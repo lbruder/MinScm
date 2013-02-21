@@ -785,7 +785,9 @@ sys:numtostr ; like number->string, 2 parameters
         (if (= max i)
             'undefined
             (iter (+ i 1) max)))
-      (iter 0 (- (string-length s) 1)))
+      (if (zero? (string-length s))
+          'undefined
+          (iter 0 (- (string-length s) 1))))
     (define (add-number n)
       (add-string (sys:numtostr n 10)))
     (define (get-value)

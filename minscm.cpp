@@ -1112,7 +1112,7 @@ public:
     Object* evalExpandedForm(Object *form, Environment *env)
     {
 tailCall:
-        //cout << "evalExpandedForm: " << form->toString() << endl;
+        // cout << "evalExpandedForm: " << form->toString() << endl;
 
         switch (form->getType())
         {
@@ -1403,6 +1403,10 @@ int main()
             cout << "Error: " << message << endl;
         }
         catch(char* message)
+        {
+            cout << "Error: " << message << endl;
+        }
+        catch(const char* message)
         {
             cout << "Error: " << message << endl;
         }
