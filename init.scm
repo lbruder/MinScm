@@ -1,4 +1,4 @@
-; vim:lisp:et
+; vim:lisp:et:ai
 
 ; init.scm version 2013-02-21
 ; A minimal Scheme library
@@ -893,7 +893,9 @@ sys:numtostr ; like number->string, 2 parameters
             (else (get-symbol-or-number "#"))))
     (define (get-symbol-or-number init)
       (let ((sym (get-identifier init)))
-        (cond ((every char-digit-or-period? (string->list sym)) (string->number sym))
+        (cond ((string=? sym "#t") #t)
+              ((string=? sym "#f") #f)
+              ((every char-digit-or-period? (string->list sym)) (string->number sym))
               (else (string->symbol sym)))))
     (define (get-list)
       ; readChar(); // Opening parenthesis
