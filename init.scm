@@ -1,6 +1,6 @@
 ; vim:lisp:et
 
-; init.scm version 2013-02-19
+; init.scm version 2013-02-21
 ; A minimal Scheme library
 ; This is an effort to create a small library of Scheme procedures
 ; as defined in R4RS (currently) with parts of SRFI-1.
@@ -89,7 +89,7 @@ sys:numtostr ; like number->string, 2 parameters
 ; - (map), (for-each), (filter), (every), (any) take two arguments, not
 ;   an arbitrary number
 ; - No support for nor dependency on call/cc
-; - Ports (chapter 6.10) are right out at the moment
+; - No Ports (chapter 6.10) yet
 
 ; Functions missing completely from R4RS:
 ; - (numerator)
@@ -737,6 +737,18 @@ sys:numtostr ; like number->string, 2 parameters
 (define (force promise)
   (promise))
 
+(define (sort x f) ; HACK: Speed up!
+  (cond ((null? x) x)
+        ((null? (cdr x)) x)
+        (else
+          (let ((pivot (car x)))
+            (let ((part1 (filter (lambda (i) (f i pivot)) (cdr x)))
+                  (part2 (filter (lambda (i) (not (f i pivot))) (cdr x))))
+              (append
+                (sort part1 f)
+                (list pivot)
+                (sort part2 f)))))))
+
 (define (sys:make-string-writer)
   (let ((value '())
         (characters 0))
@@ -782,16 +794,20 @@ sys:numtostr ; like number->string, 2 parameters
         (if (zero? count)
             dst
             (iter (cdr lst) dst (- count 1))))
-        (let ((v (make-string characters)))
-          (iter value v (- characters 1))))
+        (if (zero? characters)
+            ""
+           (let ((v (make-string characters)))
+             (iter value v (- characters 1)))))
     (define (get-reverse)
       (define (iter lst dst di count)
         (string-set! dst di (car lst))
         (if (zero? count)
             dst
             (iter (cdr lst) dst (+ di 1) (- count 1))))
-        (let ((v (make-string characters)))
-          (iter value v 0 (- characters 1))))
+        (if (zero? characters)
+            ""
+           (let ((v (make-string characters)))
+             (iter value v 0 (- characters 1)))))
     (lambda (command)
       (cond ((eq? command 'add-char) add-char)
             ((eq? command 'write-char) write-char)
@@ -818,8 +834,33 @@ sys:numtostr ; like number->string, 2 parameters
       (let ((ret (peek-char)))
         (set! position (+ position 1))
         ret))
-    (define (get-identifier)
-      'TODO)
+    (define (get-identifier init)
+      (let ((out (sys:make-string-writer)))
+        ((out 'add-string) init)
+        (define (iter)
+          (if (eof?)
+              ((out 'get))
+              (let ((c (peek-char)))
+                (cond ((char=? c #\)) ((out 'get)))
+                      ((char-whitespace? c) ((out 'get)))
+                      (else ((out 'add-char) (get-char))
+                            (iter))))))
+        (iter)))
+    (define (get-quoted-string)
+      (get-char) ; skip opening quote
+      (let ((out (sys:make-string-writer)))
+        (define (iter)
+          (let ((c (get-char)))
+            (cond ((char=? c #\") 'done)
+                  ((char=? c #\\) (set! c (get-char))
+                                  (cond ((char=? c #\n) ((out 'add-char) #\newline) (iter))
+                                        ((char=? c #\r) ((out 'add-char) #\cr) (iter))
+                                        ((char=? c #\t) ((out 'add-char) #\tab) (iter))
+                                        (else ((out 'add-char) c) (iter))))
+                  (else ((out 'add-char) c)
+                        (iter)))))
+        (iter)
+        ((out 'get))))
     (define (skip-whitespace)
       (cond ((eof?) 'eof)
             ((char-whitespace? (peek-char)) (get-char) (skip-whitespace))
@@ -828,11 +869,78 @@ sys:numtostr ; like number->string, 2 parameters
       (cond ((eof?) 'eof)
             ((char=? #\newline (get-char)) 'ok)
             (else (skip-line))))
+    (define (char-digit-or-period? c)
+      (if (char-numeric? c)
+          #t
+          (char=? c #\.)))
+    (define (get-character)
+      (let ((c (get-char)))
+        (if (char-alphabetic? c)
+            (let ((name (get-identifier (string c))))
+              (cond ((= 1 (string-length name)) (string-ref name 0))
+                    ((string=? name "newline") #\newline)
+                    ((string=? name "cr") #\cr)
+                    ((string=? name "tab") #\tab)
+                    ((string=? name "space") #\space)
+                    (else (error "Read error: Invalid character name"))))
+            c)))
+    (define (get-special)
+      (get-char) ; leading #
+      (cond ((char=? (peek-char) #\() (list->vector (get-list)))
+            ((char=? (peek-char) #\\) (get-char) (get-character))
+            (else (get-symbol-or-number "#"))))
+    (define (get-symbol-or-number init)
+      (let ((sym (get-identifier init)))
+        (cond ((every char-digit-or-period? (string->list sym)) (string->number sym))
+              (else (string->symbol sym)))))
+    (define (get-list)
+      ; readChar(); // Opening parenthesis
+      ; Object *ret = (Object*) Null::getInstance();
+      ; Object *current = (Object*) Null::getInstance();
+      ; 
+      ; for (;;)
+      ; {
+      ;     Object *o = read();
+      ;     if (o == listEnd) return ret; // Closing parenthesis
+      ;     if (o == dot)
+      ;     {
+      ;         if (current->getType() == otNull) error("Read error: Invalid dotted list");
+      ;         o = read();
+      ;         ((Pair*)current)->_cdr = o;
+      ;         if (read() != listEnd)error("Read error: Invalid dotted list");
+      ;         return ret;
+      ;     }
+      ; 
+      ;     Pair *newPair = new Pair(o, (Object*) Null::getInstance());
+      ;     if (current->getType() == otNull)
+      ;     {
+      ;         ret = current = (Object*) newPair;
+      ;     }
+      ;     else
+      ;     {
+      ;         ((Pair*)current)->_cdr = (Object*) newPair;
+      ;         current = (Object*) newPair;
+      ;     }
+      ; }
+      '()) ; TODO
+    (define (get-object throw-on-eof)
+      (skip-whitespace)
+      (if (eof?)
+          (if throw-on-eof
+              (error "string-reader: Unexpected end of input stream")
+              'eof)
+          (let ((c (peek-char)))
+            (cond ((char=? c #\;) (skip-line) (get-object throw-on-eof))
+                  ((char=? c #\') (get-char) (list 'quote (get-object throw-on-eof)))
+                  ((char=? c #\() (get-list)) ; TODO
+                  ((char=? c #\") (get-quoted-string))
+                  ((char=? c #\#) (get-special))
+                  (else (get-symbol-or-number ""))))))
     (lambda (command)
       (cond ((eq? command 'eof?) eof?)
             ((eq? command 'peek-char) peek-char)
             ((eq? command 'get-char) get-char)
-            ((eq? command 'get-identifier) get-identifier)
+            ((eq? command 'get-object) get-object)
             ((eq? command 'skip-whitespace) skip-whitespace)
             ((eq? command 'skip-line) skip-line)
             (else (error "string-reader: Unknown command"))))))
@@ -939,14 +1047,243 @@ sys:numtostr ; like number->string, 2 parameters
       (error "sqrt: Complex numbers not implemented yet")
       (iter 1)))
 
-(define r (sys:make-string-reader "tasd d blu"))
-((r 'skip-whitespace))
-(display ((r 'get-identifier)))
-(newline)
-((r 'skip-whitespace))
-(display ((r 'get-identifier)))
-(newline)
-((r 'skip-whitespace))
-(display ((r 'get-identifier)))
-(newline)
+'(begin
+  (define r (sys:make-string-reader "    tasd \"d \\nasd\\rasd\\tdsa  \"  blu  "))
+  (display "'" ((r 'get-object) #f) "'")
+  (newline)
+  (display "'" ((r 'get-object) #f) "'")
+  (newline)
+  (display "'" ((r 'get-object) #f) "'")
+  (newline)
+  (display "'" ((r 'get-object) #f) "'")
+  (newline))
 
+
+
+
+; public sealed class Compiler
+; {
+;     private readonly VirtualMachine Machine;
+; 
+;     public Compiler(VirtualMachine machine)
+;     {
+;         Machine = machine;
+;     }
+; 
+;     public void Compile(object form)
+;     {
+;         CompileObject(form, false);
+;     }
+; 
+;     private void CompileObject(object o, bool isTailPosition)
+;     {
+;         if (o is Symbol) Machine.EmitGetVariable((Symbol)o);
+;         else if (o is Pair) CompileFuncallOrSpecialForm(((Pair)o).ToArray(), isTailPosition);
+;         else Machine.EmitLdConst(o);
+;     }
+; 
+;     private void CompileQuotedObject(object o)
+;     {
+;         if (o is Symbol) Machine.EmitLdConst(o);
+;         else if (o is Pair) CompileQuotedList(((Pair)o).ToArray());
+;         else Machine.EmitLdConst(o);
+;     }
+; 
+;     private void CompileQuotedList(object[] o)
+;     {
+;         Machine.EmitSaveRegisters();
+;         Machine.EmitInitArgs();
+;         foreach (var arg in o.Reverse())
+;         {
+;             CompileQuotedObject(arg);
+;             Machine.EmitPushParam();
+;         }
+;         Machine.EmitArgsToValue();
+;         Machine.EmitRestoreRegisters();
+;     }
+; 
+;     private void CompileFuncallOrSpecialForm(object[] o, bool isTailPosition)
+;     {
+;         if (o[0] is Symbol)
+;         {
+;             switch (o[0].ToString())
+;             {
+;                 case "if": CompileIfSpecialForm(o, isTailPosition); return;
+;                 case "define": CompileDefineSpecialForm(o); return;
+;                 case "set!": CompileSetSpecialForm(o); return;
+;                 case "lambda": CompileLambdaSpecialForm(o); return;
+;                 case "quote": CompileQuoteSpecialForm(o); return;
+;                 case "begin": CompileBeginSpecialForm(o, isTailPosition); return;
+;                 case "sys:apply": CompileApplySpecialForm(o, isTailPosition); return;
+;             }
+;         }
+; 
+;         CompileFunctionCall(o, isTailPosition);
+;     }
+; 
+;     private void CompileFunctionCall(object[] o, bool isTailPosition)
+;     {
+;         if (!isTailPosition) Machine.EmitSaveRegisters();
+;         Machine.EmitInitArgs();
+; 
+;         foreach (var arg in o.Skip(1).Reverse())
+;         {
+;             CompileObject(arg, false);
+;             Machine.EmitPushParam();
+;         }
+; 
+;         CompileObject(o[0], false);
+; 
+;         if (!isTailPosition)
+;         {
+;             string continueLabel = NextLabel();
+;             Machine.EmitLdCont(continueLabel);
+;             Machine.EmitCall();
+;             Machine.EmitLabel(continueLabel);
+;             Machine.EmitRestoreRegisters();
+;         }
+;         else
+;         {
+;             Machine.EmitCall();
+;         }
+;     }
+; 
+;     private void CompileApplySpecialForm(object[] o, bool isTailPosition)
+;     {
+;         if (o.Length != 3) throw new SchemeException("Invalid apply form");
+; 
+;         if (!isTailPosition) Machine.EmitSaveRegisters();
+;         CompileObject(o[2], false);
+;         Machine.EmitValueToArgs();
+;         CompileObject(o[1], false);
+; 
+;         if (!isTailPosition)
+;         {
+;             string continueLabel = NextLabel();
+;             Machine.EmitLdCont(continueLabel);
+;             Machine.EmitCall();
+;             Machine.EmitLabel(continueLabel);
+;             Machine.EmitRestoreRegisters();
+;         }
+;         else
+;         {
+;             Machine.EmitCall();
+;         }
+;     }
+; 
+;     private string NextLabel()
+;     {
+;         return Machine.MakeLabel();
+;     }
+; 
+;     private void CompileIfSpecialForm(object[] form, bool isTailPosition)
+;     {
+;         if (form.Length != 3 && form.Length != 4) throw new SchemeException("Invalid if form");
+; 
+;         string trueLabel = NextLabel();
+;         string nextLabel = NextLabel();
+; 
+;         CompileObject(form[1], false); // Condition
+;         Machine.EmitBranchLabel(trueLabel);
+;         if (form.Length == 4) CompileObject(form[3], isTailPosition); else Machine.EmitLdConst(false); // Else-Part or #f
+;         Machine.EmitGotoLabel(nextLabel);
+;         Machine.EmitLabel(trueLabel);
+;         CompileObject(form[2], isTailPosition); // Then-Part
+;         Machine.EmitLabel(nextLabel);
+;     }
+; 
+;     private void CompileDefineSpecialForm(object[] form)
+;     {
+;         if (form.Length == 3 && form[1] is Symbol) // Define variable
+;         {
+;             CompileObject(form[2], false);
+;             Machine.EmitDefineVariable((Symbol)form[1]);
+;             return;
+;         }
+; 
+;         if (form.Length >= 3 && form[1] is Pair) // Define procedure
+;         {
+;             var nameAndParameters = ((Pair)form[1]).Cast<Symbol>();
+;             var name = nameAndParameters.First();
+;             var parameterNames = nameAndParameters.Skip(1);
+;             bool hasRestParameter = ((Pair)form[1]).IsDottedList();
+;             string closureLabel = NextLabel();
+;             string afterClosureLabel = NextLabel();
+; 
+;             Machine.EmitMakeClosure(name.ToString(), closureLabel, hasRestParameter, parameterNames.ToArray());
+;             Machine.EmitDefineVariable(name);
+;             Machine.EmitGotoLabel(afterClosureLabel);
+;             Machine.EmitLabel(closureLabel);
+; 
+;             for (int i = 2; i < form.Length; ++i)
+;                 CompileObject(form[i], i == form.Length - 1);
+; 
+;             Machine.EmitContinue();
+;             Machine.EmitLabel(afterClosureLabel);
+;             return;
+;         }
+; 
+;         throw new SchemeException("Invalid define form");
+;     }
+; 
+;     private void CompileSetSpecialForm(object[] form)
+;     {
+;         if (form.Length != 3) throw new SchemeException("Invalid set form: Expected 2 parameters");
+;         if (!(form[1] is Symbol)) throw new SchemeException("Invalid set form: '" + form[1] + "' is not a symbol");
+;         CompileObject(form[2], false);
+;         Machine.EmitSetVariable((Symbol)form[1]);
+;     }
+; 
+;     private void CompileLambdaSpecialForm(object[] form)
+;     {
+;         if (form.Length < 3) throw new SchemeException("Invalid lambda form");
+; 
+;         Symbol[] parameterNames;
+;         bool hasRestParameter;
+;         string closureLabel = NextLabel();
+;         string afterClosureLabel = NextLabel();
+; 
+;         if (form[1] is Symbol) // (lambda a (form) (form) (form))
+;         {
+;             parameterNames = new[] { (Symbol)form[1] };
+;             hasRestParameter = true;
+;         }
+;         else if (form[1] == null) // (lambda () (form) (form) (form))
+;         {
+;             parameterNames = new Symbol[0];
+;             hasRestParameter = false;
+;         }
+;         else if (form[1] is Pair) // (lambda (a b c) (form) (form) (form))
+;         {
+;             hasRestParameter = ((Pair)form[1]).IsDottedList();
+;             parameterNames = ((Pair)form[1]).Select(s => (Symbol)s).ToArray();
+;         }
+;         else throw new SchemeException("Invalid lambda form");
+; 
+;         Machine.EmitMakeClosure("lambda", closureLabel, hasRestParameter, parameterNames);
+;         Machine.EmitGotoLabel(afterClosureLabel);
+;         Machine.EmitLabel(closureLabel);
+; 
+;         for (int i = 2; i < form.Length; ++i)
+;             CompileObject(form[i], i == form.Length - 1);
+; 
+;         Machine.EmitContinue();
+;         Machine.EmitLabel(afterClosureLabel);
+;     }
+; 
+;     private void CompileQuoteSpecialForm(object[] form)
+;     {
+;         if (form.Length != 2) throw new SchemeException("Invalid quote form");
+;         CompileQuotedObject(form[1]);
+;     }
+; 
+;     private void CompileBeginSpecialForm(object[] form, bool isTailPosition)
+;     {
+;         for (int i = 1; i < form.Length; ++i)
+;             CompileObject(form[i], isTailPosition && i == form.Length - 1);
+;     }
+; }
+
+(define (read s)
+  (let ((stream (sys:make-string-reader s)))
+    ((stream 'get-object) #f)))

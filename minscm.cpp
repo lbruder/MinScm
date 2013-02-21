@@ -1,6 +1,6 @@
 // vim:et
 
-// MinScm.cpp version 2013-02-19
+// MinScm.cpp version 2013-02-21
 // An experimental Scheme subset interpreter in C++, based on SchemeNet.cs
 // Features: Tail calls, CL style macros, part of SRFI-1
 // Copyright (c) 2013, Leif Bruder <leifbruder@gmail.com>
@@ -28,6 +28,70 @@
 #include <vector>
 
 using namespace std;
+
+//----------------------------------------------------------------------------------------------------------------------
+
+// VM instructions:
+
+//private void PerformArgsToValue() { valueRegister = argumentsRegister; programCounter++; }
+//private void PerformBranchLabel(int target) { programCounter = IsTrue(valueRegister) ? target : programCounter + 1; }
+//private void PerformContinue() { programCounter = continueRegister; }
+//private void PerformDefineVariable(Symbol variable) { environmentRegister.Define(variable, valueRegister); programCounter++; }
+//private void PerformGetVariable(Symbol variable) { valueRegister = environmentRegister.Get(variable); programCounter++; }
+//private void PerformGotoLabel(int target) { programCounter = target; }
+//private void PerformInitArgs() { argumentsRegister = null; programCounter++; }
+//private void PerformLdConst(object value) { valueRegister = value; programCounter++; }
+//private void PerformLdCont(int target) { continueRegister = target; programCounter++; }
+//private void PerformPushParam() { argumentsRegister = new Pair(valueRegister, argumentsRegister); programCounter++; }
+//private void PerformRestoreRegisters() { environmentRegister = (Environment)stack.Pop(); continueRegister = (int)stack.Pop(); argumentsRegister = stack.Pop(); programCounter++; }
+//private void PerformSaveRegisters() { stack.Push(argumentsRegister); stack.Push(continueRegister); stack.Push(environmentRegister); programCounter++; }
+//private void PerformSetVariable(Symbol variable) { environmentRegister.Set(variable, valueRegister); programCounter++; }
+//private void PerformMakeClosure(string name, int target, bool hasRestParameter, Symbol[] parameterNames) { valueRegister = new Closure(name, environmentRegister, target, parameterNames, hasRestParameter); programCounter++; }
+//private void PerformValueToArgs() { argumentsRegister = valueRegister; programCounter++; }
+
+//private void PerformCall()
+//{
+//    object[] args;
+//    if (argumentsRegister == null) args = new object[0];
+//    else if (argumentsRegister is Pair) args = ((Pair)argumentsRegister).ToArray();
+//    else throw new VirtualMachineException("Invalid function application: Expected list of arguments, got " + argumentsRegister.GetType());
+
+//    argumentsRegister = null;
+
+//    if (valueRegister is Func<object[], object>)
+//    {
+//        valueRegister = ((Func<object[], object>)valueRegister)(args);
+//        programCounter = continueRegister;
+//        return;
+//    }
+
+//    if (valueRegister is Closure)
+//    {
+//        var closure = (Closure)valueRegister;
+//        var env = new Environment((closure).Captured);
+
+//        if (closure.HasRestParameter)
+//        {
+//            if (closure.ParameterNames.Length - 1 > args.Length)
+//                throw new VirtualMachineException("Invalid parameter count in call to '" + closure.Name + "': Expected " + (closure.ParameterNames.Length - 1) + " or more, got " + args.Length);
+//            for (int i = 0; i < closure.ParameterNames.Length - 1; ++i) env.Define(closure.ParameterNames[i], args[i]);
+//            env.Define(closure.ParameterNames.Last(), Pair.FromEnumerable(args.Skip(closure.ParameterNames.Length - 1)));
+//        }
+//        else
+//        {
+//            if (closure.ParameterNames.Length != args.Length)
+//                throw new VirtualMachineException("Invalid parameter count in call to '" + closure.Name + "': Expected " + closure.ParameterNames.Length + ", got " + args.Length);
+//            for (int i = 0; i < closure.ParameterNames.Length; ++i) env.Define(closure.ParameterNames[i], args[i]);
+//        }
+
+//        environmentRegister = env;
+//        programCounter = closure.PC;
+//        return;
+//    }
+
+//    throw new VirtualMachineException("Invalid CALL target");
+//}
+
 
 //----------------------------------------------------------------------------------------------------------------------
 
@@ -556,9 +620,8 @@ private:
     {
         readChar(); // Opening quote
         vector<int> sb;
-        while (peekChar() != '"')
+        for (char c = readChar(); c != '"'; c = readChar())
         {
-            char c = readChar();
             if (c == '\\')
             {
                 c = readChar();
@@ -568,7 +631,6 @@ private:
             }
             sb.push_back((char)c);
         }
-        readChar(); // Closing quote
         return (Object*) new String(sb);
     }
 
@@ -629,6 +691,7 @@ private:
 
         if (symbol == "#t") return (Object*) Boolean::getTrue();
         if (symbol == "#f") return (Object*) Boolean::getFalse();
+
         bool hasPeriod = symbol.find('.') != string::npos;
         long lValue;
         if (!hasPeriod && sb >> lValue) return (Object*) new Fixnum(lValue);
@@ -924,11 +987,14 @@ Object *sysStrToNum(Object *o1, Object *o2)
     }
 
     sb << strValue;
+    // TODO: Make sure the string consists of digits and a single period only!
+    bool hasPeriod = strValue.find('.') != string::npos;
     long lValue;
-    if (sb >> lValue) return (Object*) new Fixnum(lValue);
+    if (!hasPeriod && sb >> lValue) return (Object*) new Fixnum(lValue);
     sb.clear();
     double dValue;
     if (sb >> dValue) return (Object*) new Flonum(dValue);
+    sb.clear();
     return Symbol::fromString("nan");
 }
 
@@ -1344,3 +1410,283 @@ int main()
     return 0;
 }
 
+
+    //public sealed class RegisterMachine : VirtualMachine
+    //{
+    //    private int programCounter;
+    //    private Environment environmentRegister;
+    //    private int continueRegister;
+    //    private object valueRegister;
+    //    private object argumentsRegister;
+
+    //    private readonly List<int> gotosWithoutLabelValue = new List<int>();
+    //    private readonly Dictionary<string, int> labelPositions = new Dictionary<string, int>();
+    //    private readonly List<Instruction> Instructions = new List<Instruction>();
+    //    public int ProgramSize { get { return Instructions.Count; } }
+
+    //    private readonly Func<object, bool> IsTrue;
+    //    private readonly Stack<object> stack = new Stack<object>();
+    //    private readonly Environment globalEnvironment = new Environment();
+
+    //    public RegisterMachine(Func<object, bool> isTrue)
+    //    {
+    //        IsTrue = isTrue;
+    //    }
+
+    //    private void PerformArgsToValue() { valueRegister = argumentsRegister; programCounter++; }
+    //    private void PerformBranchLabel(int target) { programCounter = IsTrue(valueRegister) ? target : programCounter + 1; }
+    //    private void PerformContinue() { programCounter = continueRegister; }
+    //    private void PerformDefineVariable(Symbol variable) { environmentRegister.Define(variable, valueRegister); programCounter++; }
+    //    private void PerformGetVariable(Symbol variable) { valueRegister = environmentRegister.Get(variable); programCounter++; }
+    //    private void PerformGotoLabel(int target) { programCounter = target; }
+    //    private void PerformInitArgs() { argumentsRegister = null; programCounter++; }
+    //    private void PerformLdConst(object value) { valueRegister = value; programCounter++; }
+    //    private void PerformLdCont(int target) { continueRegister = target; programCounter++; }
+    //    private void PerformPushParam() { argumentsRegister = new Pair(valueRegister, argumentsRegister); programCounter++; }
+    //    private void PerformRestoreRegisters() { environmentRegister = (Environment)stack.Pop(); continueRegister = (int)stack.Pop(); argumentsRegister = stack.Pop(); programCounter++; }
+    //    private void PerformSaveRegisters() { stack.Push(argumentsRegister); stack.Push(continueRegister); stack.Push(environmentRegister); programCounter++; }
+    //    private void PerformSetVariable(Symbol variable) { environmentRegister.Set(variable, valueRegister); programCounter++; }
+    //    private void PerformMakeClosure(string name, int target, bool hasRestParameter, Symbol[] parameterNames) { valueRegister = new Closure(name, environmentRegister, target, parameterNames, hasRestParameter); programCounter++; }
+    //    private void PerformValueToArgs() { argumentsRegister = valueRegister; programCounter++; }
+
+    //    private void PerformCall()
+    //    {
+    //        object[] args;
+    //        if (argumentsRegister == null) args = new object[0];
+    //        else if (argumentsRegister is Pair) args = ((Pair)argumentsRegister).ToArray();
+    //        else throw new VirtualMachineException("Invalid function application: Expected list of arguments, got " + argumentsRegister.GetType());
+
+    //        argumentsRegister = null;
+
+    //        if (valueRegister is Func<object[], object>)
+    //        {
+    //            valueRegister = ((Func<object[], object>)valueRegister)(args);
+    //            programCounter = continueRegister;
+    //            return;
+    //        }
+
+    //        if (valueRegister is Closure)
+    //        {
+    //            var closure = (Closure)valueRegister;
+    //            var env = new Environment((closure).Captured);
+
+    //            if (closure.HasRestParameter)
+    //            {
+    //                if (closure.ParameterNames.Length - 1 > args.Length)
+    //                    throw new VirtualMachineException("Invalid parameter count in call to '" + closure.Name + "': Expected " + (closure.ParameterNames.Length - 1) + " or more, got " + args.Length);
+    //                for (int i = 0; i < closure.ParameterNames.Length - 1; ++i) env.Define(closure.ParameterNames[i], args[i]);
+    //                env.Define(closure.ParameterNames.Last(), Pair.FromEnumerable(args.Skip(closure.ParameterNames.Length - 1)));
+    //            }
+    //            else
+    //            {
+    //                if (closure.ParameterNames.Length != args.Length)
+    //                    throw new VirtualMachineException("Invalid parameter count in call to '" + closure.Name + "': Expected " + closure.ParameterNames.Length + ", got " + args.Length);
+    //                for (int i = 0; i < closure.ParameterNames.Length; ++i) env.Define(closure.ParameterNames[i], args[i]);
+    //            }
+
+    //            environmentRegister = env;
+    //            programCounter = closure.PC;
+    //            return;
+    //        }
+
+    //        throw new VirtualMachineException("Invalid CALL target");
+    //    }
+
+    //    public void EmitLabel(string label)
+    //    {
+    //        if (labelPositions.ContainsKey(label)) throw new VirtualMachineException("Label defined twice: '" + label + "'");
+    //        int targetPC = Instructions.Count;
+    //        labelPositions[label] = targetPC;
+
+    //        for (int i = 0; i < gotosWithoutLabelValue.Count; ++i)
+    //        {
+    //            if (Instructions[gotosWithoutLabelValue[i]].Label == label)
+    //            {
+    //                Instructions[gotosWithoutLabelValue[i]].LabelTarget = targetPC;
+    //                gotosWithoutLabelValue.RemoveAt(i);
+    //                i--;
+    //            }
+    //        }
+    //    }
+
+    //    public void EmitArgsToValue() { Emit(new LambdaInstruction(PerformArgsToValue)); }
+    //    public void EmitBranchLabel(string label) { Emit(new BranchLabelInstruction(label)); }
+    //    public void EmitCall() { Emit(new LambdaInstruction(PerformCall)); }
+    //    public void EmitContinue() { Emit(new LambdaInstruction(PerformContinue)); }
+    //    public void EmitDefineVariable(Symbol variable) { Emit(new LambdaInstruction(() => PerformDefineVariable(variable))); }
+    //    public void EmitGetVariable(Symbol variable) { Emit(new LambdaInstruction(() => PerformGetVariable(variable))); }
+    //    public void EmitGotoLabel(string label) { Emit(new GotoLabelInstruction(label)); }
+    //    public void EmitInitArgs() { Emit(new LambdaInstruction(PerformInitArgs)); }
+    //    public void EmitLdConst(object value) { Emit(new LambdaInstruction(() => PerformLdConst(value))); }
+    //    public void EmitLdCont(string label) { Emit(new LdContInstruction(label)); }
+    //    public void EmitMakeClosure(string name, string label, bool hasRestParameter, Symbol[] parameterNames) { Emit(new MakeClosureInstruction(name, label, hasRestParameter, parameterNames)); }
+    //    public void EmitPushParam() { Emit(new LambdaInstruction(PerformPushParam)); }
+    //    public void EmitRestoreRegisters() { Emit(new LambdaInstruction(PerformRestoreRegisters)); }
+    //    public void EmitSaveRegisters() { Emit(new LambdaInstruction(PerformSaveRegisters)); }
+    //    public void EmitSetVariable(Symbol variable) { Emit(new LambdaInstruction(() => PerformSetVariable(variable))); }
+    //    public void EmitValueToArgs() { Emit(new LambdaInstruction(PerformValueToArgs)); }
+
+    //    private void Emit(Instruction value)
+    //    {
+    //        if (value.Label != null)
+    //        {
+    //            if (labelPositions.ContainsKey(value.Label)) value.LabelTarget = labelPositions[value.Label];
+    //            else gotosWithoutLabelValue.Add(Instructions.Count);
+    //        }
+    //        Instructions.Add(value);
+    //    }
+
+    //    private void AssertRunnable()
+    //    {
+    //        if (gotosWithoutLabelValue.Any()) throw new VirtualMachineException("Invalid program: Jump targets without valid label");
+    //    }
+
+    //    private int nextLabelNo;
+    //    public string MakeLabel()
+    //    {
+    //        return "##label##" + nextLabelNo++ + "##";
+    //    }
+
+    //    public void SetVariable(string name, object value) { globalEnvironment.Define(Symbol.FromString(name), value); }
+    //    public void SetVariable(Symbol name, object value) { globalEnvironment.Define(name, value); }
+    //    public bool HasVariable(Symbol name) { return globalEnvironment.HasVariable(name); }
+    //    public object GetVariable(Symbol name) { return globalEnvironment.Get(name); }
+
+    //    public object Run(int startingPC = 0)
+    //    {
+    //        AssertRunnable();
+
+    //        programCounter = startingPC;
+    //        environmentRegister = globalEnvironment;
+    //        continueRegister = -1;
+    //        valueRegister = null;
+    //        argumentsRegister = null;
+    //        stack.Clear();
+
+    //        while (programCounter < Instructions.Count)
+    //        {
+    //            Instructions[programCounter].Execute(this);
+    //            if (programCounter == -1) break;
+    //        }
+
+    //        if (stack.Any()) throw new VirtualMachineException("Bad program: Stack not empty after last instruction");
+    //        if (argumentsRegister != null) throw new VirtualMachineException("Bad program: Arguments register not empty after last instruction");
+    //        return valueRegister;
+    //    }
+
+    //    public static bool IsCallable(object value)
+    //    {
+    //        return value is Func<object[], object> || value is Closure;
+    //    }
+
+    //    private sealed class Closure
+    //    {
+    //        public readonly Environment Captured;
+    //        public readonly int PC;
+    //        public readonly Symbol[] ParameterNames;
+    //        public readonly bool HasRestParameter;
+    //        public readonly string Name;
+
+    //        public Closure(string name, Environment captured, int pc, Symbol[] parameterNames, bool hasRestParameter)
+    //        {
+    //            Name = name;
+    //            Captured = captured;
+    //            PC = pc;
+    //            ParameterNames = parameterNames;
+    //            HasRestParameter = hasRestParameter;
+    //        }
+
+    //        public override string ToString() { return "<Compiled function " + Name + ">"; }
+    //    }
+
+    //    private class Instruction
+    //    {
+    //        public readonly string Label;
+    //        public int LabelTarget;
+    //        protected Instruction(string label) { Label = label; }
+    //        public virtual void Execute(RegisterMachine machine) { }
+    //    }
+
+    //    private sealed class LambdaInstruction : Instruction
+    //    {
+    //        private readonly Action f;
+    //        public LambdaInstruction(Action f) : base(null) { this.f = f; }
+    //        public override void Execute(RegisterMachine machine) { f(); }
+    //    }
+
+    //    private sealed class BranchLabelInstruction : Instruction
+    //    {
+    //        public BranchLabelInstruction(string label) : base(label) { }
+    //        public override void Execute(RegisterMachine machine) { machine.PerformBranchLabel(LabelTarget); }
+    //    }
+
+    //    private sealed class GotoLabelInstruction : Instruction
+    //    {
+    //        public GotoLabelInstruction(string label) : base(label) { }
+    //        public override void Execute(RegisterMachine machine) { machine.PerformGotoLabel(LabelTarget); }
+    //    }
+
+    //    private sealed class LdContInstruction : Instruction
+    //    {
+    //        public LdContInstruction(string label) : base(label) { }
+    //        public override void Execute(RegisterMachine machine) { machine.PerformLdCont(LabelTarget); }
+    //    }
+
+    //    private sealed class MakeClosureInstruction : Instruction
+    //    {
+    //        private readonly string Name;
+    //        private readonly bool HasRestParameter;
+    //        private readonly Symbol[] ParameterNames;
+    //        public MakeClosureInstruction(string name, string label, bool hasRestParameter, Symbol[] parameterNames) : base(label) { Name = name; HasRestParameter = hasRestParameter; ParameterNames = parameterNames; }
+    //        public override void Execute(RegisterMachine machine) { machine.PerformMakeClosure(Name, LabelTarget, HasRestParameter, ParameterNames); }
+    //    }
+    //}
+
+
+
+
+
+
+
+
+
+
+
+
+    //    private void HandleMacros(ref object obj)
+    //    {
+    //        if (obj == null) return;
+    //        if (!(obj is Pair)) return;
+    //        if (!(((Pair)obj).First is Symbol)) return;
+    //        var form = ((Pair)obj).ToList();
+
+    //        if (form[0].ToString() == "defmacro")
+    //        {
+    //            if (!(form[1] is Symbol)) throw new SchemeException("Invalid defmacro form: Name must be a symbol");
+    //            string name = "sys:macro##" + form[1] + "##";
+    //            obj = new Pair(Symbol.FromString("define"), new Pair(new Pair(Symbol.FromString(name), form[2]), ((Pair)((Pair)((Pair)obj).Second).Second).Second));
+    //            return;
+    //        }
+
+    //        while (true) if (!ExpandMacros(ref obj)) break;
+    //    }
+
+    //    private bool ExpandMacros(ref object obj)
+    //    {
+    //        if (obj == null) return false;
+    //        if (!(obj is Pair)) return false;
+    //        if (((Pair)obj).First.ToString() == "quote") return false;
+    //        for (object i = obj; i is Pair; i = ((Pair)i).Second) if (ExpandMacros(ref ((Pair)i).First)) return true;
+
+    //        Symbol o1 = ((Pair)obj).First as Symbol;
+    //        if (o1 == null) return false;
+
+    //        Symbol macroSymbol = Symbol.FromString("sys:macro##" + o1 + "##");
+    //        if (!machine.HasVariable(macroSymbol)) return false;
+
+    //        int nextPC = machine.ProgramSize;
+    //        compiler.Compile(new Pair(macroSymbol, Pair.FromEnumerable(((Pair)((Pair)obj).Second).Select(i => new Pair(Symbol.FromString("quote"), new Pair(i, null))))));
+    //        obj = machine.Run(nextPC);
+
+    //        return true;
+    //    }
