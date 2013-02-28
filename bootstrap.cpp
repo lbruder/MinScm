@@ -1,6 +1,6 @@
 // vim:et
 
-// MinScm.cpp version 2013-02-27
+// MinScm.cpp version 2013-02-28
 // An experimental Scheme subset interpreter in C++, based on SchemeNet.cs
 // Features: Tail calls, CL style macros, part of SRFI-1
 // Copyright (c) 2013, Leif Bruder <leifbruder@gmail.com>
@@ -33,7 +33,7 @@ using namespace std;
 
 #define error(msg) throw msg
 
-enum ObjectType { otFixnum, otFlonum, otSymbol, otPair, otString, otBoolean, otChar, otNull, otProcedure, otVector, otEof, otEnvironment };
+enum ObjectType { otFixnum, otFlonum, otSymbol, otPair, otString, otBoolean, otChar, otNull, otProcedure, otVector, otEof, otEnvironment, otTag };
 
 class Object
 {
@@ -48,6 +48,20 @@ void assertType(const char *procedure, const Object *o, ObjectType expectedType)
     if (o->getType() != expectedType)
         error((string)procedure + ": Invalid argument type");
 }
+
+//----------------------------------------------------------------------------------------------------------------------
+
+class Tag: public Object
+{
+public:
+    Tag(Object *value): _value(value) { }
+    Object *getValue() { return _value; }
+    ObjectType getType() const { return otTag; }
+    string toString() const { return "<tag " + _value->toString() + ">"; }
+
+private:
+    Object *_value;
+};
 
 //----------------------------------------------------------------------------------------------------------------------
 
@@ -628,12 +642,19 @@ private:
         if (symbol == "#t") return (Object*) Boolean::getTrue();
         if (symbol == "#f") return (Object*) Boolean::getFalse();
 
-        bool hasPeriod = symbol.find('.') != string::npos;
+        int periods = 0;
+        bool digitsAndPeriodsOnly = true;
+        for (size_t i=0; i<symbol.size(); ++i)
+        {
+            if (symbol[i] == '.') ++periods;
+            else if (symbol[i] < '0' || symbol[i] > '9') digitsAndPeriodsOnly = false;
+        }
+
         long lValue;
-        if (!hasPeriod && sb >> lValue) return (Object*) new Fixnum(lValue);
+        if (periods == 0 && digitsAndPeriodsOnly && sb >> lValue) return (Object*) new Fixnum(lValue);
         sb.clear();
         double dValue;
-        if (sb >> dValue) return (Object*) new Flonum(dValue);
+        if (periods < 2 && digitsAndPeriodsOnly && sb >> dValue) return (Object*) new Flonum(dValue);
         sb.clear();
         if (symbol.substr(0, 2) == "#x")
         {
@@ -658,54 +679,36 @@ Object *cdr(Object *o)
     return ((Pair*)o)->_cdr;
 }
 
-Object *isFixnum(Object *o)
+Object *sysType(Object *o)
 {
-    return (Object*) Boolean::valueOf(o->getType() == otFixnum);
+    switch (o->getType())
+    {
+    case otFixnum: return Symbol::fromString("fixnum");
+    case otFlonum: return Symbol::fromString("real");
+    case otSymbol: return Symbol::fromString("symbol");
+    case otPair: return Symbol::fromString("pair");
+    case otString: return Symbol::fromString("string");
+    case otBoolean: return Symbol::fromString("boolean");
+    case otChar: return Symbol::fromString("char");
+    case otNull: return Symbol::fromString("null");
+    case otProcedure: return Symbol::fromString("procedure");
+    case otVector: return Symbol::fromString("vector");
+    case otEof: return Symbol::fromString("eof");
+    case otEnvironment: return Symbol::fromString("environment");
+    case otTag: return Symbol::fromString("tag");
+    default: throw "sys:type: Invalid argument type";
+    }
 }
 
-Object *isFlonum(Object *o)
+Object *sysTag(Object *o)
 {
-    return (Object*) Boolean::valueOf(o->getType() == otFlonum);
+    return new Tag(o);
 }
 
-Object *isSymbol(Object *o)
+Object *sysUntag(Object *o)
 {
-    return (Object*) Boolean::valueOf(o->getType() == otSymbol);
-}
-
-Object *isPair(Object *o)
-{
-    return (Object*) Boolean::valueOf(o->getType() == otPair);
-}
-
-Object *isString(Object *o)
-{
-    return (Object*) Boolean::valueOf(o->getType() == otString);
-}
-
-Object *isBoolean(Object *o)
-{
-    return (Object*) Boolean::valueOf(o->getType() == otBoolean);
-}
-
-Object *isChar(Object *o)
-{
-    return (Object*) Boolean::valueOf(o->getType() == otChar);
-}
-
-Object *isNull(Object *o)
-{
-    return (Object*) Boolean::valueOf(o->getType() == otNull);
-}
-
-Object *isProcedure(Object *o)
-{
-    return (Object*) Boolean::valueOf(o->getType() == otProcedure);
-}
-
-Object *isVector(Object *o)
-{
-    return (Object*) Boolean::valueOf(o->getType() == otVector);
+    assertType("sys:untag", o, otTag);
+    return ((Tag*)o)->getValue();
 }
 
 Object *integerToChar(Object *o)
@@ -992,16 +995,9 @@ public:
     {
         DEFUN1(car, "car");
         DEFUN1(cdr, "cdr");
-        DEFUN1(isFixnum, "integer?");
-        DEFUN1(isFlonum, "real?");
-        DEFUN1(isSymbol, "symbol?");
-        DEFUN1(isPair, "pair?");
-        DEFUN1(isString, "string?");
-        DEFUN1(isBoolean, "boolean?");
-        DEFUN1(isChar, "char?");
-        DEFUN1(isNull, "null?");
-        DEFUN1(isProcedure, "procedure?");
-        DEFUN1(isVector, "vector?");
+        DEFUN1(sysType, "sys:type");
+        DEFUN1(sysTag, "sys:tag");
+        DEFUN1(sysUntag, "sys:untag");
         DEFUN1(integerToChar, "integer->char");
         DEFUN1(charToInteger, "char->integer");
         DEFUN1(stringLength, "string-length");

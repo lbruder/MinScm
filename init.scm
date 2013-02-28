@@ -1,6 +1,6 @@
 ; vim:lisp:et:ai
 
-; init.scm version 2013-02-27
+; init.scm version 2013-02-28
 ; A minimal Scheme library
 ; This is an effort to create a small library of Scheme procedures
 ; as defined in R4RS (currently) with parts of SRFI-1.
@@ -35,12 +35,7 @@
 
 ; Expected special forms:
 
-; if
-; define
-; set!
-; quote
-; lambda
-; begin
+; if define set! quote lambda begin
 
 ; Expected macro functionality:
 
@@ -51,9 +46,11 @@
 ; Expected procedures:
 
 ; One parameter:
-car cdr pair? null? string? boolean? symbol? integer? real? procedure?
-vector? char? char->integer integer->char string-length
+car cdr char->integer integer->char string-length
 string->symbol symbol->string vector-length make-string make-vector
+sys:type ; returns the type of the argument as a symbol
+sys:tag ; Create a special object of type 'tag from the value given
+sys:untag ; Return the value stored in a 'tag object
 sys:display-string ; takes a string to output
 sys:exit ; ends the program with the fixnum given as the program's return code
 
@@ -67,6 +64,53 @@ string-set! vector-set!
 ; Temporary requirements until this library is "done":
 sys:strtonum ; like string->number, 2 parameters, returns 'nan on error
 sys:numtostr ; like number->string, 2 parameters
+
+; ----------------------------------------------------------------------------
+; TODO: MISSING STUFF
+; ----------------------------------------------------------------------------
+
+; - Re-defining builtins may (and very probably will) break your program.
+; - TODO: Add unit tests! Check all of R4RS. Everything working correctly?
+; - TODO: vector and string functions are eerily similar...
+; - TODO: or, named let, do loops, let*, letrec...
+; - TODO: Signed numbers and rationals in reader
+; - TODO: eval
+
+; As of now, deviations from R4RS chapter 6 are:
+; - (append) created lists do not share the last argument, dotted lists
+;   don't work yet
+; - Distinction between integer and real, not between exact and inexact
+; - Numerical operations depend on the runtime to provide fixnum and real
+;   types. Basic rationals implemented here, no bigints or complex numbers yet
+; - Character procedures consider the ASCII charset only
+; - (map), (for-each), (filter), (every), (any) take two arguments, not
+;   an arbitrary number
+; - No support for nor dependency on call/cc
+; - No Ports (chapter 6.10) yet
+
+; Functions missing completely from R4RS:
+; - (floor)
+; - (ceiling)
+; - (truncate)
+; - (round)
+; - (rationalize)
+; - (exp)
+; - (expt)
+; - (log)
+; - (sin)
+; - (cos)
+; - (tan)
+; - (asin)
+; - (acos)
+; - (atan)
+; - (make-rectangular)
+; - (make-polar)
+; - (real-part)
+; - (imag-part)
+; - (magnitude)
+; - (angle)
+; - (exact->inexact)
+; - (inexact->exact)
 
 ; ----------------------------------------------------------------------------
 ; INTEGRATED COMPILER
@@ -169,60 +213,42 @@ sys:numtostr ; like number->string, 2 parameters
 ; Transfer contents of value to args register.
 
 ; ----------------------------------------------------------------------------
-; MISSING STUFF
-; ----------------------------------------------------------------------------
 
-; TODO: Add unit tests! Check all of R4RS. Everything working correctly?
-; HACK: vector and string functions are eerily similar...
-; TODO: or, Named let, do loops, let*, letrec...
+(define (pair? x) (eq? (sys:type x) 'pair))
+(define (null? x) (eq? (sys:type x) 'null))
+(define (string? x) (eq? (sys:type x) 'string))
+(define (boolean? x) (eq? (sys:type x) 'boolean))
+(define (symbol? x) (eq? (sys:type x) 'symbol))
+(define (fixnum? x) (eq? (sys:type x) 'fixnum))
+(define (procedure? x) (eq? (sys:type x) 'procedure))
+(define (vector? x) (eq? (sys:type x) 'vector))
+(define (char? x) (eq? (sys:type x) 'char))
+(define (sys:tagged? x) (eq? (sys:type x) 'tag))
 
-; TODO: Protect ALL procedures from changes by the user. If someone
-; re-defines the flip procedure, string-append might stop working...
+(define (real? x)
+  (if (eq? (sys:type x) 'real)
+      #t
+      (rational? x)))
 
-; TODO: As of now, deviations from R4RS chapter 6 are:
-; - (append) created lists do not share the last argument, dotted lists
-;   don't work yet
-; - Distinction between integer and real, not between exact and inexact
-; - Numerical operations depend on the runtime. Minimal numeric tower here
-;   consisting of fixnum and real.
-; - Character procedures consider the ASCII charset only
-; - (map), (for-each), (filter), (every), (any) take two arguments, not
-;   an arbitrary number
-; - No support for nor dependency on call/cc
-; - No Ports (chapter 6.10) yet
+(define (sys:make-tagged-value tag value)
+  (sys:tag (cons tag value)))
 
-; Functions missing completely from R4RS:
-; - (numerator)
-; - (denominator)
-; - (floor)
-; - (ceiling)
-; - (truncate)
-; - (round)
-; - (rationalize)
-; - (exp)
-; - (expt)
-; - (log)
-; - (sin)
-; - (cos)
-; - (tan)
-; - (asin)
-; - (acos)
-; - (atan)
-; - (make-rectangular)
-; - (make-polar)
-; - (real-part)
-; - (imag-part)
-; - (magnitude)
-; - (angle)
-; - (exact->inexact)
-; - (inexact->exact)
+(define (sys:tagged-type? obj tag)
+  (if (sys:tagged? obj)
+      (eq? tag (car (sys:untag obj)))
+      #f))
 
-(define (complex? obj) #f)
-(define (rational? obj) #f)
-(define exact? integer?)
-(define inexact? real?)
+(define (sys:get-tagged-value obj tag)
+  (if (sys:tagged-type? obj tag)
+      (cdr (sys:untag obj))
+      (error "sys:get-tagged-value: Object is not of desired type")))
 
-; ----------------------------------------------------------------------------
+(define integer? fixnum?) ; TODO: Bigints
+(define (complex? obj) (real? obj)) ; TODO
+(define (exact? obj) (rational? obj))
+(define (inexact? x) (eq? (sys:type x) 'real))
+
+(define number? complex?)
 
 (define (caar x) (car (car x)))
 (define (cadr x) (car (cdr x)))
@@ -273,11 +299,6 @@ sys:numtostr ; like number->string, 2 parameters
 
 (define (>= a b)
   (not (< a b)))
-
-(define (number? x)
-  (if (integer? x)
-      #t
-      (real? x)))
 
 (define (abs x)
   (if (positive? x)
@@ -410,7 +431,7 @@ sys:numtostr ; like number->string, 2 parameters
         (iter (* 0.5 (+ guess (/ n guess))))))
   (if (< n 0)
       (error "sqrt: Complex numbers not implemented yet")
-      (iter 1)))
+      (iter 1.0)))
 
 (define (sys:gcd-of-two a b)
   (if (zero? b)
@@ -675,7 +696,6 @@ sys:numtostr ; like number->string, 2 parameters
         (not b)))
   (cond ((eq? a b) #t)
         ((and (real? a) (real? b)) (= a b))
-        ((and (integer? a) (integer? b)) (= a b))
         ((and (char? a) (char? b)) (char=? a b))
         ((and (boolean? a) (boolean? b)) (bool=? a b))
         (else #f)))
@@ -725,20 +745,6 @@ sys:numtostr ; like number->string, 2 parameters
   (if (> a b)
       a
       b))
-
-(let ((original min))
-  (set! min
-        (lambda args
-          (cond ((null? args) (error "min: Called without parameters"))
-                ((null? (cdr args)) (car args))
-                (else (reduce original 0 args))))))
-
-(let ((original max))
-  (set! max
-        (lambda args
-          (cond ((null? args) (error "max: Called without parameters"))
-                ((null? (cdr args)) (car args))
-                (else (reduce original 0 args))))))
 
 (define (drop-while f lst)
   (cond ((null? lst) '())
@@ -809,6 +815,159 @@ sys:numtostr ; like number->string, 2 parameters
                     acc))))
   (iter (- (vector-length v) 1) '()))
 
+(defmacro delay (expression)
+  (list 'let
+        '((##forced #f)
+          (##forced_value #f))
+        (list 'lambda
+              '()
+              (list 'if '##forced
+                        #t
+                        (list 'begin
+                              (list 'set! '##forced_value expression)
+                              '(set! ##forced #t)))
+              '##forced_value)))
+
+(define (force promise)
+  (promise))
+
+; Bigints --------------------------------------------------------------------
+
+; TODO
+
+; Rationals ------------------------------------------------------------------
+
+(define (sys:fraction? n)
+  (sys:tagged-type? n 'fraction))
+
+(define (rational? n)
+  (if (integer? n)
+      #t
+      (sys:fraction? n)))
+
+(define (numerator n)
+  (if (sys:fraction? n)
+      (car (sys:get-tagged-value n 'fraction))
+      n))
+
+(define (denominator n)
+  (if (sys:fraction? n)
+      (cdr (sys:get-tagged-value n 'fraction))
+      1))
+
+(define (sys:fraction->string n)
+  (if (sys:fraction? n)
+      (let ((stream (sys:make-string-writer)))
+        ((stream 'add-number) (numerator n))
+        ((stream 'add-char) #\/)
+        ((stream 'add-number) (denominator n))
+        ((stream 'get)))
+      (error "sys:fraction->string: Object is not of fraction type")))
+
+(define sys:make-fraction 0)
+(define sys:frac<? 0)
+(define sys:frac=? 0)
+(define sys:frac+ 0)
+(define sys:frac- 0)
+(define sys:frac* 0)
+(define sys:frac/ 0)
+
+(let ((+ +) (- -) (* *) (/ /) (< <) (= =))
+  (set! sys:make-fraction
+    (lambda (a b)
+      (if (and (integer? a) (integer? b))
+          (let ((g (gcd a b)))
+            (if (= b g)
+                (quotient a g)
+                (sys:make-tagged-value 'fraction
+                                       (cons (quotient a g) ; TODO: Store sign in numerator. Denominator is always positive!
+                                             (quotient b g)))))
+          (/ a b))))
+  (set! sys:frac+
+    (lambda (a b)
+      (sys:make-fraction (+ (* (numerator a) (denominator b))
+                            (* (numerator b) (denominator a)))
+                         (* (denominator a) (denominator b)))))
+  (set! sys:frac-
+    (lambda (a b)
+      (sys:make-fraction (- (* (numerator a) (denominator b))
+                            (* (numerator b) (denominator a)))
+                         (* (denominator a) (denominator b)))))
+  (set! sys:frac*
+    (lambda (a b)
+      (sys:make-fraction (* (numerator a) (numerator b))
+                         (* (denominator a) (denominator b)))))
+  (set! sys:frac/
+    (lambda (a b)
+      (sys:make-fraction (* (numerator a) (denominator b))
+                         (* (denominator a) (numerator b)))))
+  (set! sys:frac<?
+    (lambda (a b)
+      (< (numerator (sys:frac- a b))
+         0)))
+  (set! sys:frac=?
+    (lambda (a b)
+      (= 0 (numerator (sys:frac- a b))))))
+
+; TODO Resolve unwanted recursion
+'(let ((original +))
+  (set! +
+        (lambda (a b)
+          (cond ((rational? a) (sys:frac+ a b))
+                ((rational? b) (sys:frac+ a b))
+                (else (original a b))))))
+
+'(let ((original -))
+  (set! -
+        (lambda (a b)
+          (cond ((rational? a) (sys:frac- a b))
+                ((rational? b) (sys:frac- a b))
+                (else (original a b))))))
+
+'(let ((original *))
+  (set! *
+        (lambda (a b)
+          (cond ((rational? a) (sys:frac* a b))
+                ((rational? b) (sys:frac* a b))
+                (else (original a b))))))
+
+'(let ((original /))
+  (set! /
+        (lambda (a b)
+          (cond ((rational? a) (sys:frac/ a b))
+                ((rational? b) (sys:frac/ a b))
+                (else (original a b))))))
+
+'(let ((original <))
+  (set! <
+        (lambda (a b)
+          (cond ((rational? a) (sys:frac<? a b))
+                ((rational? b) (sys:frac<? a b))
+                (else (original a b))))))
+
+'(let ((original =))
+  (set! =
+        (lambda (a b)
+          (cond ((rational? a) (sys:frac=? a b))
+                ((rational? b) (sys:frac=? a b))
+                (else (original a b))))))
+
+; Augment operators to take an arbitrary number of arguments -----------------
+
+(let ((original min))
+  (set! min
+        (lambda args
+          (cond ((null? args) (error "min: Called without parameters"))
+                ((null? (cdr args)) (car args))
+                (else (reduce original 0 args))))))
+
+(let ((original max))
+  (set! max
+        (lambda args
+          (cond ((null? args) (error "max: Called without parameters"))
+                ((null? (cdr args)) (car args))
+                (else (reduce original 0 args))))))
+
 (let ((original +))
   (set! +
         (lambda args 
@@ -844,21 +1003,7 @@ sys:numtostr ; like number->string, 2 parameters
                 ""
                 args))))
 
-(defmacro delay (expression)
-  (list 'let
-        '((##forced #f)
-          (##forced_value #f))
-        (list 'lambda
-              '()
-              (list 'if '##forced
-                        #t
-                        (list 'begin
-                              (list 'set! '##forced_value expression)
-                              '(set! ##forced #t)))
-              '##forced_value)))
-
-(define (force promise)
-  (promise))
+; Other stuff ----------------------------------------------------------------
 
 (define (sort x f) ; HACK: Speed up!
   (cond ((null? x) x)
@@ -975,6 +1120,7 @@ sys:numtostr ; like number->string, 2 parameters
 (define (sys:add-object-to-string-writer obj stream readable)
   (cond ((null? obj) ((stream 'add-string) "()"))
         ((boolean? obj) ((stream 'add-string) (if obj "#t" "#f")))
+        ((sys:fraction? obj) ((stream 'add-string) (sys:fraction->string obj)))
         ((number? obj) ((stream 'add-number) obj))
         ((symbol? obj) ((stream 'add-string) (symbol->string obj)))
         ((char? obj) ((stream (if readable 'write-char 'add-char)) obj))
