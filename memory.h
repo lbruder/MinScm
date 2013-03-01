@@ -83,9 +83,8 @@ void environment_define(position_t env, position_t symbol, position_t value);
 void environment_set(position_t env, position_t symbol, position_t value);
 position_t environment_get(position_t env, position_t symbol);
 
-position_t new_tagged_value(position_t symbol, position_t value);
-position_t get_tag(position_t tagged_value);
-position_t get_value(position_t tagged_value);
+position_t new_tagged_value(position_t value);
+position_t get_tagged_value(position_t tagged_value);
 
 #endif
 

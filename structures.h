@@ -147,7 +147,6 @@ struct Environment_Node {
 
 struct Tagged_Value {
         struct Object obj_data;
-        position_t symbol;
         position_t value;
 };
 
