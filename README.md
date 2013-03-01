@@ -12,8 +12,10 @@ on a portable C runtime and, running on top of it, an interpreter/compiler
 combo written in Scheme. At the moment it is nothing more than a highly
 experimental playground, so beware.
 
-TODO: No reference counting or GC yet. Leaking memory like hell, but usable
-for simple tasks.
+Compile the file bootstrap.cpp with a C++ compiler of your choice, then run
+the executable. You'll end up in a Scheme REPL leaking memory like hell.
+Good luck.
+
 
 Permission to use, copy, modify, and/or distribute this software for any
 purpose with or without fee is hereby granted, provided that the above

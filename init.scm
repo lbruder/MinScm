@@ -1,6 +1,6 @@
 ; vim:lisp:et:ai
 
-; init.scm version 2013-02-28
+; init.scm version 2013-03-01
 ; A minimal Scheme library
 ; This is an effort to create a small library of Scheme procedures
 ; as defined in R4RS (currently) with parts of SRFI-1.
@@ -15,7 +15,7 @@
 ; purpose with or without fee is hereby granted, provided that the above
 ; copyright notice and this permission notice appear in all copies.
 ; 
-; THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+; THE SOFTWARE IS PROVIDED 'AS IS' AND THE AUTHOR DISCLAIMS ALL WARRANTIES
 ; WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
 ; MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
 ; ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
@@ -27,7 +27,7 @@
 ; CONFIGURATION
 ; ----------------------------------------------------------------------------
 
-(define *sys:epsilon* 0.000001) ; Precision for inexact arithmetic functions
+(define *epsilon* 0.000001) ; Precision for inexact arithmetic functions
 
 ; ----------------------------------------------------------------------------
 ; RUNTIME REQUIREMENTS
@@ -45,31 +45,36 @@
 
 ; Expected procedures:
 
-; One parameter:
-car cdr char->integer integer->char string-length
-string->symbol symbol->string vector-length make-string make-vector
-sys:type ; returns the type of the argument as a symbol
-sys:tag ; Create a special object of type 'tag from the value given
-sys:untag ; Return the value stored in a 'tag object
-sys:display-string ; takes a string to output
-sys:exit ; ends the program with the fixnum given as the program's return code
+; One parameter, working as expected:
+car cdr char->integer integer->char string-length vector-length
+string->symbol symbol->string make-string make-vector
+
+; One parameter, special stuff:
+type ; returns the type of the argument as a symbol
+tag ; Create a special object of type 'tag from the value given
+untag ; Return the value stored in a 'tag object
+display-string ; takes a string to output
+exit ; ends the program with the fixnum given as the program's return code
+flo->str ; number -> string
+str->flo ; number -> flonum or 'nan
+fix->flo ; fixnum -> flonum
 
 ; Two parameters:
-cons set-car! set-cdr! + - * / < = quotient remainder eq? apply string-ref
-vector-ref
+cons set-car! set-cdr! eq? sys:apply string-ref vector-ref fix+ fix- fix*
+fix/ fix% fix< fix= flo+ flo- flo* flo/ flo< flo=
 
 ; Three parameters:
 string-set! vector-set!
 
-; Temporary requirements until this library is "done":
-sys:strtonum ; like string->number, 2 parameters, returns 'nan on error
-sys:numtostr ; like number->string, 2 parameters
+; Only needed until re-coded in this lib:
+fix->str ; number, base -> string
+str->fix ; number, base -> fixnum or 'nan
 
 ; ----------------------------------------------------------------------------
-; TODO: MISSING STUFF
+; MISSING STUFF
 ; ----------------------------------------------------------------------------
 
-; - Re-defining builtins may (and very probably will) break your program.
+; - TODO: Re-defining builtins may (and very probably will) break your program
 ; - TODO: Add unit tests! Check all of R4RS. Everything working correctly?
 ; - TODO: vector and string functions are eerily similar...
 ; - TODO: or, named let, do loops, let*, letrec...
@@ -79,9 +84,9 @@ sys:numtostr ; like number->string, 2 parameters
 ; As of now, deviations from R4RS chapter 6 are:
 ; - (append) created lists do not share the last argument, dotted lists
 ;   don't work yet
-; - Distinction between integer and real, not between exact and inexact
-; - Numerical operations depend on the runtime to provide fixnum and real
-;   types. Basic rationals implemented here, no bigints or complex numbers yet
+; - Distinction between rational and real, not between exact and inexact
+; - Numerical tower consists of fixnum => rational => flonum, no bigints or
+;   complex numbers (yet)
 ; - Character procedures consider the ASCII charset only
 ; - (map), (for-each), (filter), (every), (any) take two arguments, not
 ;   an arbitrary number
@@ -109,16 +114,15 @@ sys:numtostr ; like number->string, 2 parameters
 ; - (imag-part)
 ; - (magnitude)
 ; - (angle)
-; - (exact->inexact)
 ; - (inexact->exact)
 
 ; ----------------------------------------------------------------------------
 ; INTEGRATED COMPILER
 ; ----------------------------------------------------------------------------
 
-; The function (sys:compile code emit) implements a very basic Scheme compiler
-; that reads expressions from the string given in the "code" variable and
-; calls the "emit" procedure for every low-level statement to be output. By
+; The function (compile code emit) implements a very basic Scheme compiler
+; that reads expressions from the string given in the 'code' variable and
+; calls the 'emit' procedure for every low-level statement to be output. By
 ; providing an appropriate emit procedure, a Scheme source can be compiled
 ; e.g. to C or Assembly language.
 
@@ -133,8 +137,8 @@ sys:numtostr ; like number->string, 2 parameters
 ; public object Run()
 ; {
 ;     programCounter = 0;
-;     environmentRegister = globalEnvironment;
-;     continueRegister = -1;
+;     environmentRegister = globalEnvironment; // Containing all required procedures as stated above
+;     continueRegister = -1; // Continuing to -1 means program end
 ;     valueRegister = null;
 ;     argumentsRegister = null;
 ;     stack.Clear();
@@ -212,43 +216,37 @@ sys:numtostr ; like number->string, 2 parameters
 ; value->args
 ; Transfer contents of value to args register.
 
-; ----------------------------------------------------------------------------
+; Base -----------------------------------------------------------------------
 
-(define (pair? x) (eq? (sys:type x) 'pair))
-(define (null? x) (eq? (sys:type x) 'null))
-(define (string? x) (eq? (sys:type x) 'string))
-(define (boolean? x) (eq? (sys:type x) 'boolean))
-(define (symbol? x) (eq? (sys:type x) 'symbol))
-(define (fixnum? x) (eq? (sys:type x) 'fixnum))
-(define (procedure? x) (eq? (sys:type x) 'procedure))
-(define (vector? x) (eq? (sys:type x) 'vector))
-(define (char? x) (eq? (sys:type x) 'char))
-(define (sys:tagged? x) (eq? (sys:type x) 'tag))
+(define (pair? x) (eq? (type x) 'pair))
+(define (null? x) (eq? (type x) 'null))
+(define (string? x) (eq? (type x) 'string))
+(define (boolean? x) (eq? (type x) 'boolean))
+(define (symbol? x) (eq? (type x) 'symbol))
+(define (fixnum? x) (eq? (type x) 'fixnum))
+(define (flonum? x) (eq? (type x) 'flonum))
+(define (procedure? x) (eq? (type x) 'procedure))
+(define (vector? x) (eq? (type x) 'vector))
+(define (char? x) (eq? (type x) 'char))
+(define (tagged? x) (eq? (type x) 'tag))
 
-(define (real? x)
-  (if (eq? (sys:type x) 'real)
-      #t
-      (rational? x)))
+(define (make-tagged-value tag-symbol value)
+  (tag (cons tag-symbol value)))
 
-(define (sys:make-tagged-value tag value)
-  (sys:tag (cons tag value)))
-
-(define (sys:tagged-type? obj tag)
-  (if (sys:tagged? obj)
-      (eq? tag (car (sys:untag obj)))
+(define (tagged-type? obj tag-symbol)
+  (if (tagged? obj)
+      (eq? tag-symbol (car (untag obj)))
       #f))
 
-(define (sys:get-tagged-value obj tag)
-  (if (sys:tagged-type? obj tag)
-      (cdr (sys:untag obj))
-      (error "sys:get-tagged-value: Object is not of desired type")))
+(define (get-tagged-value obj tag-symbol)
+  (if (tagged-type? obj tag-symbol)
+      (cdr (untag obj))
+      (error "get-tagged-value: Object is not of desired type")))
 
-(define integer? fixnum?) ; TODO: Bigints
-(define (complex? obj) (real? obj)) ; TODO
-(define (exact? obj) (rational? obj))
-(define (inexact? x) (eq? (sys:type x) 'real))
-
-(define number? complex?)
+(define (type-name obj)
+  (if (tagged? obj)
+      (car (untag obj))
+      (type obj)))
 
 (define (caar x) (car (car x)))
 (define (cadr x) (car (cdr x)))
@@ -279,64 +277,17 @@ sys:numtostr ; like number->string, 2 parameters
 (define (cdddar x) (cdr (cdr (cdr (car x)))))
 (define (cddddr x) (cdr (cdr (cdr (cdr x)))))
 
+(define (apply f lst) (sys:apply f lst)) ; Turn the special form into a procedure
 (define (list . lst) lst)
-(define (zero? x) (= x 0))
-(define (positive? x) (> x 0))
-(define (negative? x) (< x 0))
 
 (define (not x)
   (if x
       #f
       #t))
 
-(define (> a b)
-  (if (< a b)
-      #f
-      (not (= a b))))
-
-(define (<= a b)
-  (not (> a b)))
-
-(define (>= a b)
-  (not (< a b)))
-
-(define (abs x)
-  (if (positive? x)
-      x
-      (- 0 x)))
-
-(define (even? x)
-  (zero? (remainder x 2)))
-
-(define (odd? x)
-  (not (even? x)))
-
-(define (error . args)
-  (for-each (lambda (i) (sys:display-string (sys:object->string i #f)))
-            args)
-  (newline)
-  (sys:exit 1))
-
-(define (sys:sign x)
-  (if (negative? x)
-      -1
-      1))
-
-(define (modulo a b)
-  (if (= (sys:sign a) (sys:sign b))
-      (remainder a b)
-      (+ b (remainder a b))))
-
-(define (string . values)
-  (list->string values))
-
-(define (list-tail lst k)
-  (if (zero? k)
-      lst
-      (list-tail (cdr lst) (- k 1))))
-
-(define (list-ref lst k)
-  (car (list-tail lst k)))
+(define (flip f)
+  (lambda (a b)
+    (f b a)))
 
 (define (fold f acc lst)
   (if (null? lst)
@@ -352,11 +303,6 @@ sys:numtostr ; like number->string, 2 parameters
 
 (define (reverse lst)
   (fold cons '() lst))
-
-(define (length lst)
-  (fold (lambda (i acc) (+ acc 1))
-        0
-        lst))
 
 (define (for-each f lst)
   (fold (lambda (i acc) (f i))
@@ -410,46 +356,6 @@ sys:numtostr ; like number->string, 2 parameters
         ((f (car lst)) #t)
         (else (any f (cdr lst)))))
 
-(define (string->number n . rest)
-  (let ((ret (sys:strtonum n (if (pair? rest) (car rest) 10))))
-    (if (eq? ret 'nan)
-        (error "string->number: Value can not be converted to a number")
-        ret)))
-
-(define (number->string n . rest)
-  (if (pair? rest)
-      (sys:numtostr n (car rest))
-      (sys:numtostr n 10)))
-
-(define (sys:abs<epsilon x)
-  (< (abs x) *sys:epsilon*))
-
-(define (sqrt n)
-  (define (iter guess)
-    (if (sys:abs<epsilon (- n (* guess guess)))
-        guess
-        (iter (* 0.5 (+ guess (/ n guess))))))
-  (if (< n 0)
-      (error "sqrt: Complex numbers not implemented yet")
-      (iter 1.0)))
-
-(define (sys:gcd-of-two a b)
-  (if (zero? b)
-      a
-      (sys:gcd-of-two b (remainder a b))))
-
-(define (sys:lcm-of-two a b)
-  (/ (* a b)
-     (sys:gcd-of-two a b)))
-
-(define (gcd . args)
-  (abs
-    (reduce sys:gcd-of-two 0 args)))
-
-(define (lcm . args)
-  (abs
-    (reduce sys:lcm-of-two 1 args)))
-
 (define (append . lsts) ; HACK: Speed up!
   (define (iter current acc)
     (if (null? current)
@@ -488,6 +394,253 @@ sys:numtostr ; like number->string, 2 parameters
                         (cdr list-of-forms))
                 #f))))
 
+(define (drop-while f lst)
+  (cond ((null? lst) '())
+        ((f (car lst)) (drop-while f (cdr lst)))
+        (else lst)))
+
+(define (take-while f lst)
+  (define (iter l acc)
+    (cond ((null? l) acc)
+          ((f (car l)) (iter (cdr l) (cons (car l) acc)))
+          (else acc)))
+  (reverse (iter lst '())))
+
+; Bigints --------------------------------------------------------------------
+
+; TODO: Implement
+
+(define integer? fixnum?)
+(define bi->str fix->str)
+(define str->bi str->fix)
+(define bi< fix<)
+(define bi= fix=)
+(define bi+ fix+)
+(define bi- fix-)
+(define bi* fix*)
+(define bi/ fix/)
+(define bi% fix%)
+(define bi->flo fix->flo)
+
+; Rationals ------------------------------------------------------------------
+
+(define (gcd-of-two a b)
+  (if (bi= 0 b)
+      a
+      (gcd-of-two b (bi% a b))))
+
+(define (lcm-of-two a b)
+  (bi/ (bi* a b)
+       (gcd-of-two a b)))
+
+(define (gcd . args)
+  (abs
+    (reduce gcd-of-two 0 args)))
+
+(define (lcm . args)
+  (abs
+    (reduce lcm-of-two 1 args)))
+
+(define (fraction? n)
+  (tagged-type? n 'fraction))
+
+(define (rational? n)
+  (if (fraction? n)
+      #t
+      (integer? n)))
+
+(define (numerator n)
+  (if (fraction? n)
+      (car (get-tagged-value n 'fraction))
+      n))
+
+(define (denominator n)
+  (if (fraction? n)
+      (cdr (get-tagged-value n 'fraction))
+      1))
+
+(define (fraction->string n)
+  (if (fraction? n)
+      (let ((stream (make-string-writer)))
+        ((stream 'add-number) (numerator n))
+        ((stream 'add-char) #\/)
+        ((stream 'add-number) (denominator n))
+        ((stream 'get)))
+      (error "fraction->string: Object is not of fraction type")))
+
+(define (rational->string n base)
+  (if (fraction? n)
+      (if (bi= base 10)
+          (fraction->string n)
+          (error "rational->string: Only base 10 allowed for fractions")) ; TODO
+      (bi->str n base)))
+
+(define (rational->flonum n)
+  (if (integer? n)
+      (bi->flo n)
+      (flo/ (bi->flo (numerator n))
+            (bi->flo (denominator n)))))
+
+(define (make-fraction a b)
+  (if (and (integer? a) (integer? b))
+      (let ((g (gcd a b)))
+        (if (bi= b g)
+            (bi/ a g)
+            (make-tagged-value 'fraction
+                               (cons (bi/ a g) ; TODO: Store sign in numerator. Denominator is always positive!
+                                     (bi/ b g)))))
+      (error "make-fraction: Expected two integer values, got " (type-name a) " and " (type-name b))))
+
+(define (frac+ a b)
+  (make-fraction (bi+ (bi* (numerator a) (denominator b))
+                      (bi* (numerator b) (denominator a)))
+                 (bi* (denominator a) (denominator b))))
+
+(define (frac- a b)
+  (make-fraction (bi- (bi* (numerator a) (denominator b))
+                      (bi* (numerator b) (denominator a)))
+                 (bi* (denominator a) (denominator b))))
+
+(define (frac* a b)
+  (make-fraction (bi* (numerator a) (numerator b))
+                 (bi* (denominator a) (denominator b))))
+
+(define (frac/ a b)
+  (make-fraction (bi* (numerator a) (denominator b))
+                 (bi* (denominator a) (numerator b))))
+
+(define (frac< a b)
+  (bi< (bi* (numerator a) (denominator b))
+       (bi* (numerator b) (denominator a))))
+
+(define (frac= a b)
+  (bi= (bi* (numerator a) (denominator b))
+       (bi* (numerator b) (denominator a))))
+
+; Numerical tower ------------------------------------------------------------
+
+(define (real? x)
+  (if (flonum? x)
+      #t
+      (rational? x)))
+
+(define exact? rational?) ; TODO
+(define (inexact? obj) (not (exact? obj))) ; TODO
+(define complex? real?) ; TODO
+(define number? complex?) ; TODO
+
+(define (exact->inexact x)
+  (if (exact? x)
+      (rational->flonum x)
+      x))
+
+(define (+ a b)
+  (cond ((flonum? a) (flo+ a (exact->inexact b)))
+        ((flonum? b) (flo+ (exact->inexact a) b))
+        (else (frac+ a b))))
+
+(define (- a b)
+  (if (flonum? a)
+      (flo- a (exact->inexact b))
+      (if (flonum? b)
+          (flo- (exact->inexact a) b)
+          (frac- a b))))
+
+(define (* a b)
+  (if (flonum? a)
+      (flo* a (exact->inexact b))
+      (if (flonum? b)
+          (flo* (exact->inexact a) b)
+          (frac* a b))))
+
+(define (/ a b)
+  (if (flonum? a)
+      (flo/ a (exact->inexact b))
+      (if (flonum? b)
+          (flo/ (exact->inexact a) b)
+          (frac/ a b))))
+
+(define (< a b)
+  (if (flonum? a)
+      (flo< a (exact->inexact b))
+      (if (flonum? b)
+          (flo< (exact->inexact a) b)
+          (frac< a b))))
+
+(define (= a b)
+  (if (flonum? a)
+      (flo= a (exact->inexact b))
+      (if (flonum? b)
+          (flo= (exact->inexact a) b)
+          (frac= a b))))
+
+(define (quotient a b)
+  (if (integer? a)
+      (if (integer? b)
+          (bi/ a b)
+          (error "quotient: Expected integer argument, got " (type-name b)))
+      (error "quotient: Expected integer argument, got " (type-name a))))
+
+(define (remainder a b)
+  (if (integer? a)
+      (if (integer? b)
+          (bi% a b)
+          (error "remainder: Expected integer argument, got " (type-name b)))
+      (error "remainder: Expected integer argument, got " (type-name a))))
+
+(define (zero? x)
+  (= x 0))
+
+(define (positive? x)
+  (> x 0))
+
+(define (negative? x)
+  (< x 0))
+
+(define (> a b)
+  (if (< a b)
+      #f
+      (not (= a b))))
+
+(define (<= a b)
+  (not (> a b)))
+
+(define (>= a b)
+  (not (< a b)))
+
+(define (abs x)
+  (if (positive? x)
+      x
+      (- 0 x)))
+
+(define (even? x)
+  (zero? (remainder x 2)))
+
+(define (odd? x)
+  (not (even? x)))
+
+(define (sign x)
+  (if (negative? x)
+      -1
+      1))
+
+(define (modulo a b)
+  (if (= (sign a) (sign b))
+      (remainder a b)
+      (+ b (remainder a b))))
+
+(define (min a b)
+  (if (< a b)
+      a
+      b))
+
+(define (max a b)
+  (if (> a b)
+      a
+      b))
+
+; Character procedures -------------------------------------------------------
+
 (define (char=? a b)
   (= (char->integer a)
      (char->integer b)))
@@ -515,6 +668,11 @@ sys:numtostr ; like number->string, 2 parameters
 (define (char-numeric? c)
   (let ((as-int (char->integer c)))
     (and (> as-int 47) (< as-int 58))))
+
+(define (char-digit-or-period? c)
+  (if (char-numeric? c)
+      #t
+      (char=? c #\.)))
 
 (define (char-whitespace? c)
   (let ((as-int (char->integer c)))
@@ -561,9 +719,72 @@ sys:numtostr ; like number->string, 2 parameters
 (define (char-ci<=? a b)
   (not (char-ci>? a b)))
 
-(define (flip f)
-  (lambda (a b)
-    (f b a)))
+; Vector procedures ----------------------------------------------------------
+
+(let ((original make-vector))
+  (set! make-vector
+        (lambda (size . args)
+          (if (null? args)
+              (original size)
+              (let ((v (original size)))
+                   (vector-fill! v (car args))
+                   v)))))
+
+(define (vector-fill! v obj)
+  (define (iter i len)
+    (if (= i len)
+        'unspecified
+        (begin
+          (vector-set! v i obj)
+          (iter (+ i 1) len))))
+  (iter 0 (vector-length v)))
+
+(define (list->vector lst) ; HACK: Speed up!
+  (define (iter v i vals)
+    (vector-set! v i (car vals))
+    (if (zero? i)
+        v
+        (iter v (- i 1) (cdr vals))))
+  (if (null? lst)
+      (make-vector 0)
+      (let ((v (make-vector (length lst))))
+        (iter v (- (vector-length v) 1) (reverse lst)))))
+
+(define (vector . lst)
+  (list->vector lst))
+
+(define (vector->list v)
+  (define (iter i acc)
+    (if (< i 0)
+        acc
+        (iter (- i 1)
+              (cons (vector-ref v i)
+                    acc))))
+  (iter (- (vector-length v) 1) '()))
+
+; String procedures ----------------------------------------------------------
+
+(define (numtostr n base)
+  (if (rational? n)
+      (rational->string n base)
+      (flo->str n))) ; TODO
+
+(define (strtonum str base)
+  (let ((ret (str->bi str base))) ; TODO: Rationals
+    (if (eq? ret 'nan)
+        (str->flo str)
+        ret)))
+
+(define (string->number n . rest)
+  (let ((ret (strtonum n (if (pair? rest) (car rest) 10))))
+    (if (eq? ret 'nan)
+        (error "string->number: Value can not be converted to a number")
+        ret)))
+
+(define (number->string n . rest)
+  (if (pair? rest)
+      (numtostr n (car rest))
+      (numtostr n 10)))
 
 (let ((original make-string))
   (set! make-string
@@ -593,6 +814,9 @@ sys:numtostr ; like number->string, 2 parameters
       (make-string 0)
       (let ((v (make-string (length lst))))
         (iter v 0 (- (string-length v) 1) lst))))
+
+(define (string . values)
+  (list->string values))
 
 (define (string-copy s)
   (define (iter dst i max)
@@ -689,13 +913,74 @@ sys:numtostr ; like number->string, 2 parameters
                     acc))))
   (iter (- (string-length s) 1) '()))
 
+; Promises -------------------------------------------------------------------
+
+(define (make-promise f)
+  (let ((value #f)
+        (forced #f))
+    (make-tagged-value 'promise
+                       (lambda ()
+                         (if forced
+                             value
+                             (begin
+                               (set! value (f))
+                               (set! forced #t)
+                               value))))))
+
+(define (promise? obj)
+  (tagged-type? obj 'promise))
+
+(define (force obj)
+  (if (promise? obj)
+      ((get-tagged-value obj 'promise))
+      obj))
+
+(defmacro delay (expression)
+  (list 'make-promise
+        (list 'lambda 
+              '()
+              expression)))
+
+; TODO categorize ------------------------------------------------------------
+
+(define (error . args)
+  (for-each (lambda (i) (display-string (object->string i #f)))
+            args)
+  (newline)
+  (exit 1))
+
+(define (list-tail lst k)
+  (if (zero? k)
+      lst
+      (list-tail (cdr lst) (- k 1))))
+
+(define (list-ref lst k)
+  (car (list-tail lst k)))
+
+(define (length lst)
+  (fold (lambda (i acc) (+ acc 1))
+        0
+        lst))
+
+(define (abs<epsilon x)
+  (< (abs x) *epsilon*))
+
+(define (sqrt n)
+  (define (iter guess)
+    (if (abs<epsilon (- n (* guess guess)))
+        guess
+        (iter (* 0.5 (+ guess (/ n guess))))))
+  (if (< n 0)
+      (error "sqrt: Complex numbers not implemented yet")
+      (iter 1.0)))
+
 (define (eqv? a b)
   (define (bool=? a b)
     (if a
         b
         (not b)))
   (cond ((eq? a b) #t)
-        ((and (real? a) (real? b)) (= a b))
+        ((and (number? a) (number? b)) (= a b))
         ((and (char? a) (char? b)) (char=? a b))
         ((and (boolean? a) (boolean? b)) (bool=? a b))
         (else #f)))
@@ -736,28 +1021,6 @@ sys:numtostr ; like number->string, 2 parameters
 (define (assoc obj lst)
   (find (lambda (i) (equal? (car i) obj)) lst))
 
-(define (min a b)
-  (if (< a b)
-      a
-      b))
-
-(define (max a b)
-  (if (> a b)
-      a
-      b))
-
-(define (drop-while f lst)
-  (cond ((null? lst) '())
-        ((f (car lst)) (drop-while f (cdr lst)))
-        (else lst)))
-
-(define (take-while f lst)
-  (define (iter l acc)
-    (cond ((null? l) acc)
-          ((f (car l)) (iter (cdr l) (cons (car l) acc)))
-          (else acc)))
-  (reverse (iter lst '())))
-
 (define (take lst i)
   (define (iter l totake acc)
     (cond ((null? l) acc)
@@ -774,183 +1037,31 @@ sys:numtostr ; like number->string, 2 parameters
         (iter (- i 1) (cons i acc))))
   (iter to '()))
 
-(let ((original make-vector))
-  (set! make-vector
-        (lambda (size . args)
-          (if (null? args)
-              (original size)
-              (let ((v (original size)))
-                   (vector-fill! v (car args))
-                   v)))))
+(define (sort x f) ; HACK: Speed up!
+  (cond ((null? x) x)
+        ((null? (cdr x)) x)
+        (else
+          (let ((pivot (car x)))
+            (let ((part1 (filter (lambda (i) (f i pivot)) (cdr x)))
+                  (part2 (filter (lambda (i) (not (f i pivot))) (cdr x))))
+              (append
+                (sort part1 f)
+                (list pivot)
+                (sort part2 f)))))))
 
-(define (vector-fill! v obj)
-  (define (iter i len)
-    (if (= i len)
-        'unspecified
-        (begin
-          (vector-set! v i obj)
-          (iter (+ i 1) len))))
-  (iter 0 (vector-length v)))
-
-(define (list->vector lst) ; HACK: Speed up!
-  (define (iter v i vals)
-    (vector-set! v i (car vals))
-    (if (zero? i)
-        v
-        (iter v (- i 1) (cdr vals))))
+(define (dotted-list? lst)
   (if (null? lst)
-      (make-vector 0)
-      (let ((v (make-vector (length lst))))
-        (iter v (- (vector-length v) 1) (reverse lst)))))
+      #f
+      (if (pair? lst)
+          (dotted-list? (cdr lst))
+          #t)))
 
-(define (vector . lst)
-  (list->vector lst))
-
-(define (vector->list v)
+(define (make-proper-list lst)
   (define (iter i acc)
-    (if (< i 0)
-        acc
-        (iter (- i 1)
-              (cons (vector-ref v i)
-                    acc))))
-  (iter (- (vector-length v) 1) '()))
-
-(defmacro delay (expression)
-  (list 'let
-        '((##forced #f)
-          (##forced_value #f))
-        (list 'lambda
-              '()
-              (list 'if '##forced
-                        #t
-                        (list 'begin
-                              (list 'set! '##forced_value expression)
-                              '(set! ##forced #t)))
-              '##forced_value)))
-
-(define (force promise)
-  (promise))
-
-; Bigints --------------------------------------------------------------------
-
-; TODO
-
-; Rationals ------------------------------------------------------------------
-
-(define (sys:fraction? n)
-  (sys:tagged-type? n 'fraction))
-
-(define (rational? n)
-  (if (integer? n)
-      #t
-      (sys:fraction? n)))
-
-(define (numerator n)
-  (if (sys:fraction? n)
-      (car (sys:get-tagged-value n 'fraction))
-      n))
-
-(define (denominator n)
-  (if (sys:fraction? n)
-      (cdr (sys:get-tagged-value n 'fraction))
-      1))
-
-(define (sys:fraction->string n)
-  (if (sys:fraction? n)
-      (let ((stream (sys:make-string-writer)))
-        ((stream 'add-number) (numerator n))
-        ((stream 'add-char) #\/)
-        ((stream 'add-number) (denominator n))
-        ((stream 'get)))
-      (error "sys:fraction->string: Object is not of fraction type")))
-
-(define sys:make-fraction 0)
-(define sys:frac<? 0)
-(define sys:frac=? 0)
-(define sys:frac+ 0)
-(define sys:frac- 0)
-(define sys:frac* 0)
-(define sys:frac/ 0)
-
-(let ((+ +) (- -) (* *) (/ /) (< <) (= =))
-  (set! sys:make-fraction
-    (lambda (a b)
-      (if (and (integer? a) (integer? b))
-          (let ((g (gcd a b)))
-            (if (= b g)
-                (quotient a g)
-                (sys:make-tagged-value 'fraction
-                                       (cons (quotient a g) ; TODO: Store sign in numerator. Denominator is always positive!
-                                             (quotient b g)))))
-          (/ a b))))
-  (set! sys:frac+
-    (lambda (a b)
-      (sys:make-fraction (+ (* (numerator a) (denominator b))
-                            (* (numerator b) (denominator a)))
-                         (* (denominator a) (denominator b)))))
-  (set! sys:frac-
-    (lambda (a b)
-      (sys:make-fraction (- (* (numerator a) (denominator b))
-                            (* (numerator b) (denominator a)))
-                         (* (denominator a) (denominator b)))))
-  (set! sys:frac*
-    (lambda (a b)
-      (sys:make-fraction (* (numerator a) (numerator b))
-                         (* (denominator a) (denominator b)))))
-  (set! sys:frac/
-    (lambda (a b)
-      (sys:make-fraction (* (numerator a) (denominator b))
-                         (* (denominator a) (numerator b)))))
-  (set! sys:frac<?
-    (lambda (a b)
-      (< (numerator (sys:frac- a b))
-         0)))
-  (set! sys:frac=?
-    (lambda (a b)
-      (= 0 (numerator (sys:frac- a b))))))
-
-; TODO Resolve unwanted recursion
-'(let ((original +))
-  (set! +
-        (lambda (a b)
-          (cond ((rational? a) (sys:frac+ a b))
-                ((rational? b) (sys:frac+ a b))
-                (else (original a b))))))
-
-'(let ((original -))
-  (set! -
-        (lambda (a b)
-          (cond ((rational? a) (sys:frac- a b))
-                ((rational? b) (sys:frac- a b))
-                (else (original a b))))))
-
-'(let ((original *))
-  (set! *
-        (lambda (a b)
-          (cond ((rational? a) (sys:frac* a b))
-                ((rational? b) (sys:frac* a b))
-                (else (original a b))))))
-
-'(let ((original /))
-  (set! /
-        (lambda (a b)
-          (cond ((rational? a) (sys:frac/ a b))
-                ((rational? b) (sys:frac/ a b))
-                (else (original a b))))))
-
-'(let ((original <))
-  (set! <
-        (lambda (a b)
-          (cond ((rational? a) (sys:frac<? a b))
-                ((rational? b) (sys:frac<? a b))
-                (else (original a b))))))
-
-'(let ((original =))
-  (set! =
-        (lambda (a b)
-          (cond ((rational? a) (sys:frac=? a b))
-                ((rational? b) (sys:frac=? a b))
-                (else (original a b))))))
+    (cond ((pair? i) (iter (cdr i) (cons (car i) acc)))
+          ((null? i) acc)
+          (else (cons i acc))))
+  (reverse (iter lst '())))
 
 ; Augment operators to take an arbitrary number of arguments -----------------
 
@@ -1003,37 +1114,9 @@ sys:numtostr ; like number->string, 2 parameters
                 ""
                 args))))
 
-; Other stuff ----------------------------------------------------------------
-
-(define (sort x f) ; HACK: Speed up!
-  (cond ((null? x) x)
-        ((null? (cdr x)) x)
-        (else
-          (let ((pivot (car x)))
-            (let ((part1 (filter (lambda (i) (f i pivot)) (cdr x)))
-                  (part2 (filter (lambda (i) (not (f i pivot))) (cdr x))))
-              (append
-                (sort part1 f)
-                (list pivot)
-                (sort part2 f)))))))
-
-(define (dotted-list? lst)
-  (if (null? lst)
-      #f
-      (if (pair? lst)
-          (dotted-list? (cdr lst))
-          #t)))
-
-(define (make-proper-list lst)
-  (define (iter i acc)
-    (cond ((pair? i) (iter (cdr i) (cons (car i) acc)))
-          ((null? i) acc)
-          (else (cons i acc))))
-  (reverse (iter lst '())))
-
 ; Writer ----------------------------------------------------------------------
 
-(define (sys:make-string-writer)
+(define (make-string-writer)
   (let ((value '())
         (characters 0))
     (define (add-char c)
@@ -1073,7 +1156,7 @@ sys:numtostr ; like number->string, 2 parameters
           'undefined
           (iter 0 (- (string-length s) 1))))
     (define (add-number n)
-      (add-string (sys:numtostr n 10)))
+      (add-string (numtostr n 10)))
     (define (get-value)
       (define (iter lst dst count)
         (string-set! dst count (car lst))
@@ -1104,48 +1187,48 @@ sys:numtostr ; like number->string, 2 parameters
             ((eq? command 'get-reverse) get-reverse)
             (else (error "string-writer: Unknown command"))))))
 
-(define (sys:add-pair-to-string-writer obj stream readable)
+(define (add-pair-to-string-writer obj stream readable)
   (define (iter i)
-    (sys:add-object-to-string-writer (car i) stream readable)
+    (add-object-to-string-writer (car i) stream readable)
     (cond ((null? (cdr i)) 'done)
           ((pair? (cdr i)) ((stream 'add-char) #\space) (iter (cdr i)))
           (else
             ((stream 'add-string) " . ") 
-            (sys:add-object-to-string-writer (cdr i) stream readable)
+            (add-object-to-string-writer (cdr i) stream readable)
             'done)))
   ((stream 'add-char) #\()
   (iter obj)
   ((stream 'add-char) #\)))
 
-(define (sys:add-object-to-string-writer obj stream readable)
+(define (add-object-to-string-writer obj stream readable)
   (cond ((null? obj) ((stream 'add-string) "()"))
         ((boolean? obj) ((stream 'add-string) (if obj "#t" "#f")))
-        ((sys:fraction? obj) ((stream 'add-string) (sys:fraction->string obj)))
+        ((fraction? obj) ((stream 'add-string) (fraction->string obj)))
         ((number? obj) ((stream 'add-number) obj))
         ((symbol? obj) ((stream 'add-string) (symbol->string obj)))
         ((char? obj) ((stream (if readable 'write-char 'add-char)) obj))
         ((string? obj) ((stream (if readable 'write-string 'add-string)) obj))
-        ((pair? obj) (sys:add-pair-to-string-writer obj stream readable))
+        ((pair? obj) (add-pair-to-string-writer obj stream readable))
         ((vector? obj) ((stream 'add-char) #\#)
-                       (sys:add-object-to-string-writer (vector->list obj)
+                       (add-object-to-string-writer (vector->list obj)
                                                        stream
                                                        readable))
         ((procedure? obj) ((stream 'add-string) "<procedure>"))
         (else (error "Unable to create readable representation of object"))))
 
-(define (sys:object->string obj readable)
-  (let ((stream (sys:make-string-writer)))
-    (sys:add-object-to-string-writer obj stream readable)
+(define (object->string obj readable)
+  (let ((stream (make-string-writer)))
+    (add-object-to-string-writer obj stream readable)
     ((stream 'get))))
 
 ; Output functions ------------------------------------------------------------
 
 (define (display . args)
-  (for-each (lambda (i) (sys:display-string (sys:object->string i #f)))
+  (for-each (lambda (i) (display-string (object->string i #f)))
             args))
 
 (define (write . args)
-  (for-each (lambda (i) (sys:display-string (sys:object->string i #t)))
+  (for-each (lambda (i) (display-string (object->string i #t)))
             args))
 
 (define (newline) (display "\n"))
@@ -1156,7 +1239,7 @@ sys:numtostr ; like number->string, 2 parameters
 
 ; Reader ----------------------------------------------------------------------
 
-(define (sys:make-string-reader str)
+(define (make-string-reader str)
   (let ((len (string-length str))
         (position 0))
     (define (eof?)
@@ -1173,7 +1256,7 @@ sys:numtostr ; like number->string, 2 parameters
         (set! position (+ position 1))
         ret))
     (define (get-identifier init)
-      (let ((out (sys:make-string-writer)))
+      (let ((out (make-string-writer)))
         ((out 'add-string) init)
         (define (iter)
           (if (eof?)
@@ -1190,7 +1273,7 @@ sys:numtostr ; like number->string, 2 parameters
             (iter))))
     (define (get-quoted-string)
       (get-char) ; skip opening quote
-      (let ((out (sys:make-string-writer)))
+      (let ((out (make-string-writer)))
         (define (iter)
           (let ((c (get-char)))
             (cond ((char=? c #\") 'done)
@@ -1211,10 +1294,6 @@ sys:numtostr ; like number->string, 2 parameters
       (cond ((eof?) 'eof)
             ((char=? #\newline (get-char)) 'ok)
             (else (skip-line))))
-    (define (char-digit-or-period? c)
-      (if (char-numeric? c)
-          #t
-          (char=? c #\.)))
     (define (get-character)
       (let ((c (get-char)))
         (if (char-alphabetic? c)
@@ -1278,12 +1357,12 @@ sys:numtostr ; like number->string, 2 parameters
             (else (error "string-reader: Unknown command"))))))
 
 (define (read s)
-  (let ((stream (sys:make-string-reader s)))
+  (let ((stream (make-string-reader s)))
     ((stream 'get-object) #f)))
 
 ; Compiler --------------------------------------------------------------------
 
-(define (sys:compile code emit)
+(define (compile code emit)
   (define make-label '())
   (let ((label 0))
     (set! make-label
@@ -1351,7 +1430,7 @@ sys:numtostr ; like number->string, 2 parameters
     ;     if (form[0].ToString() == "defmacro")
     ;     {
     ;         if (!(form[1] is Symbol)) throw new SchemeException("Invalid defmacro form: Name must be a symbol");
-    ;         string name = "sys:macro##" + form[1] + "##";
+    ;         string name = "macro##" + form[1] + "##";
     ;         obj = new Pair(Symbol.FromString("define"), new Pair(new Pair(Symbol.FromString(name), form[2]), ((Pair)((Pair)((Pair)obj).Second).Second).Second));
     ;         return;
     ;     }
@@ -1369,7 +1448,7 @@ sys:numtostr ; like number->string, 2 parameters
     ;     Symbol o1 = ((Pair)obj).First as Symbol;
     ;     if (o1 == null) return false;
     ; 
-    ;     Symbol macroSymbol = Symbol.FromString("sys:macro##" + o1 + "##");
+    ;     Symbol macroSymbol = Symbol.FromString("macro##" + o1 + "##");
     ;     if (!machine.HasVariable(macroSymbol)) return false;
     ; 
     ;     int nextPC = machine.ProgramSize;
@@ -1475,4 +1554,24 @@ sys:numtostr ; like number->string, 2 parameters
           (begin
             (compile-form form #f)
             (compiler-loop reader)))))
-  (compiler-loop (sys:make-string-reader code)))
+  (compiler-loop (make-string-reader code)))
+
+; Unit tests ------------------------------------------------------------------
+
+(define (perform-assertion name condition)
+  (if condition
+      'ok
+      (display (string-append "Assertion failed: " name "\n"))))
+
+(defmacro assert (condition)
+  (list 'perform-assertion
+        (object->string condition #t)
+        condition))
+
+(assert (= 1 1))
+(assert (> 2 1))
+(assert (< 1 2))
+(assert (= (/ 12 3) 4))
+(assert (> (/ 13 3) 4))
+(assert (< (/ 13 3) 5))
+

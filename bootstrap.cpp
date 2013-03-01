@@ -1,6 +1,6 @@
 // vim:et
 
-// MinScm.cpp version 2013-02-28
+// MinScm.cpp version 2013-03-01
 // An experimental Scheme subset interpreter in C++, based on SchemeNet.cs
 // Features: Tail calls, CL style macros, part of SRFI-1
 // Copyright (c) 2013, Leif Bruder <leifbruder@gmail.com>
@@ -684,7 +684,7 @@ Object *sysType(Object *o)
     switch (o->getType())
     {
     case otFixnum: return Symbol::fromString("fixnum");
-    case otFlonum: return Symbol::fromString("real");
+    case otFlonum: return Symbol::fromString("flonum");
     case otSymbol: return Symbol::fromString("symbol");
     case otPair: return Symbol::fromString("pair");
     case otString: return Symbol::fromString("string");
@@ -696,7 +696,7 @@ Object *sysType(Object *o)
     case otEof: return Symbol::fromString("eof");
     case otEnvironment: return Symbol::fromString("environment");
     case otTag: return Symbol::fromString("tag");
-    default: throw "sys:type: Invalid argument type";
+    default: throw "type: Invalid argument type";
     }
 }
 
@@ -707,7 +707,7 @@ Object *sysTag(Object *o)
 
 Object *sysUntag(Object *o)
 {
-    assertType("sys:untag", o, otTag);
+    assertType("untag", o, otTag);
     return ((Tag*)o)->getValue();
 }
 
@@ -764,26 +764,52 @@ Object *makeVector(Object *o)
 
 Object *sysDisplayString(Object *o)
 {
-    assertType("sys:display-string", o, otString);
+    assertType("display-string", o, otString);
     cout << ((String*)o)->getValue();
     return Symbol::fromString("undefined");
 }
 
 Object *sysExit(Object *o)
 {
-    assertType("sys:exit", o, otFixnum);
+    assertType("exit", o, otFixnum);
     stringstream sb;
     sb << "Execution stopped with error code " << ((Fixnum*)o)->getValue();
     error(sb.str());
     return NULL; // Just to keep the compiler happy
 }
 
-//----------------------------------------------------------------------------------------------------------------------
-
-Object *cons(Object *car, Object *cdr)
+Object *sysFixToFlo(Object *o1)
 {
-    return (Object*) new Pair(car, cdr);
+    assertType("fix->flo", o1, otFixnum);
+    return (Object*) new Flonum(((Fixnum*)o1)->getValue());
 }
+
+Object *sysStrToFlo(Object *o1)
+{
+    assertType("str->flo", o1, otString);
+    string strValue = ((String*)o1)->getValue();
+    stringstream sb;
+    sb << strValue;
+    // TODO: Make sure the string consists of digits only!
+    double dValue;
+    if (sb >> dValue) return (Object*) new Flonum(dValue);
+    return Symbol::fromString("nan");
+}
+
+Object *sysFloToStr(Object *o1)
+{
+    stringstream sb;
+    assertType("flo->str", o1, otFlonum);
+
+    sb << ((Flonum*)o1)->getValue();
+    string sValue;
+    sb >> sValue;
+    vector<int> characters;
+    for (size_t i=0; i<sValue.size(); ++i) characters.push_back(sValue[i]);
+    return (Object*) new String(characters);
+}
+
+//----------------------------------------------------------------------------------------------------------------------
 
 Object *setCar(Object *o, Object *newCar)
 {
@@ -799,84 +825,34 @@ Object *setCdr(Object *o, Object *newCdr)
     return (Object*) Symbol::fromString("undefined");
 }
 
-double getDoubleValue(string functionName, Object *o)
+int getFix(const char* procedure, Object *o)
 {
-    switch(o->getType())
-    {
-    case otFixnum: return ((Fixnum*)o)->getValue(); 
-    case otFlonum : return ((Flonum*)o)->getValue(); 
-    default: error(functionName + ": Invalid argument type"); return 0;
-    }
+    assertType(procedure, o, otFixnum);
+    return ((Fixnum*)o)->getValue();
 }
 
-Object *mathPlus(Object *o1, Object *o2)
+double getFlo(const char* procedure, Object *o)
 {
-    if (o1->getType() == otFixnum && o2->getType() == otFixnum)
-        return (Object*) new Fixnum(((Fixnum*)o1)->getValue() + ((Fixnum*)o2)->getValue());
-    else
-        return (Object*) new Flonum(getDoubleValue("+", o1) + getDoubleValue("+", o2));
+    assertType(procedure, o, otFlonum);
+    return ((Flonum*)o)->getValue();
 }
 
-Object *mathMinus(Object *o1, Object *o2)
-{
-    if (o1->getType() == otFixnum && o2->getType() == otFixnum)
-        return (Object*) new Fixnum(((Fixnum*)o1)->getValue() - ((Fixnum*)o2)->getValue());
-    else
-        return (Object*) new Flonum(getDoubleValue("-", o1) - getDoubleValue("-", o2));
-}
-
-Object *mathMult(Object *o1, Object *o2)
-{
-    if (o1->getType() == otFixnum && o2->getType() == otFixnum)
-        return (Object*) new Fixnum(((Fixnum*)o1)->getValue() * ((Fixnum*)o2)->getValue());
-    else
-        return (Object*) new Flonum(getDoubleValue("*", o1) * getDoubleValue("*", o2));
-}
-
-Object *mathDiv(Object *o1, Object *o2)
-{
-    if (o1->getType() == otFixnum && o2->getType() == otFixnum)
-        return (Object*) new Flonum((double)((Fixnum*)o1)->getValue() / ((Fixnum*)o2)->getValue());
-    else
-        return (Object*) new Flonum(getDoubleValue("/", o1) / getDoubleValue("/", o2));
-}
-
-Object *mathLt(Object *o1, Object *o2)
-{
-    if (o1->getType() == otFixnum && o2->getType() == otFixnum)
-        return (Object*) Boolean::valueOf(((Fixnum*)o1)->getValue() < ((Fixnum*)o2)->getValue());
-    else
-        return (Object*) Boolean::valueOf(getDoubleValue("<", o1) < getDoubleValue("<", o2));
-}
-
-Object *mathEq(Object *o1, Object *o2)
-{
-    if (o1->getType() == otFixnum && o2->getType() == otFixnum)
-        return (Object*) Boolean::valueOf(((Fixnum*)o1)->getValue() == ((Fixnum*)o2)->getValue());
-    else
-        return (Object*) Boolean::valueOf(getDoubleValue("=", o1) == getDoubleValue("=", o2));
-}
-
-Object *mathQuotient(Object *o1, Object *o2)
-{
-    if (o1->getType() == otFixnum && o2->getType() == otFixnum)
-        return (Object*) new Fixnum(((Fixnum*)o1)->getValue() / ((Fixnum*)o2)->getValue());
-    else
-        return (Object*) new Fixnum((int) getDoubleValue("quotient", o1) / (int) getDoubleValue("quotient", o2));
-}
-
-Object *mathRemainder(Object *o1, Object *o2)
-{
-    if (o1->getType() == otFixnum && o2->getType() == otFixnum)
-        return (Object*) new Fixnum(((Fixnum*)o1)->getValue() % ((Fixnum*)o2)->getValue());
-    else
-        return (Object*) new Fixnum((int) getDoubleValue("remainder", o1) % (int) getDoubleValue("remainder", o2));
-}
-
-Object *eq(Object *o1, Object *o2)
-{
-    return (Object*) Boolean::valueOf(o1 == o2);
-}
+Object *cons(Object *car, Object *cdr) { return (Object*) new Pair(car, cdr); }
+Object *fixPlus(Object *o1, Object *o2) { return (Object*) new Fixnum(getFix("fix+", o1) + getFix("fix+", o2)); }
+Object *fixMinus(Object *o1, Object *o2) { return (Object*) new Fixnum(getFix("fix-", o1) - getFix("fix-", o2)); }
+Object *fixMult(Object *o1, Object *o2) { return (Object*) new Fixnum(getFix("fix*", o1) * getFix("fix*", o2)); }
+Object *fixDiv(Object *o1, Object *o2) { return (Object*) new Fixnum(getFix("fix/", o1) / getFix("fix/", o2)); }
+Object *fixMod(Object *o1, Object *o2) { return (Object*) new Fixnum(getFix("fix%", o1) % getFix("fix%", o2)); }
+Object *fixLt(Object *o1, Object *o2) { return (Object*) Boolean::valueOf(getFix("fix<", o1) < getFix("fix<", o2)); }
+Object *fixEq(Object *o1, Object *o2) { return (Object*) Boolean::valueOf(getFix("fix=", o1) == getFix("fix=", o2)); }
+Object *floPlus(Object *o1, Object *o2) { return (Object*) new Flonum(getFlo("flo+", o1) + getFlo("flo+", o2)); }
+Object *floMinus(Object *o1, Object *o2) { return (Object*) new Flonum(getFlo("flo-", o1) - getFlo("flo-", o2)); }
+Object *floMult(Object *o1, Object *o2) { return (Object*) new Flonum(getFlo("flo*", o1) * getFlo("flo*", o2)); }
+Object *floDiv(Object *o1, Object *o2) { return (Object*) new Flonum(getFlo("flo/", o1) / getFlo("flo/", o2)); }
+//TODO Object *floMod(Object *o1, Object *o2) { return (Object*) new Flonum(getFlo("flo%", o1) % getFlo("flo%", o2)); }
+Object *floLt(Object *o1, Object *o2) { return (Object*) Boolean::valueOf(getFlo("flo<", o1) < getFlo("flo<", o2)); }
+Object *floEq(Object *o1, Object *o2) { return (Object*) Boolean::valueOf(getFlo("flo=", o1) == getFlo("flo=", o2)); }
+Object *eq(Object *o1, Object *o2) { return (Object*) Boolean::valueOf(o1 == o2); }
 
 Object* applyHack(Object *form, Environment *env);
 
@@ -909,53 +885,46 @@ Object *vectorRef(Object *o1, Object *o2)
     return (Object*) ((Vector*)o1)->GetAt(((Fixnum*)o2)->getValue());
 }
 
-Object *sysStrToNum(Object *o1, Object *o2)
+Object *sysStrToFix(Object *o1, Object *o2)
 {
-    assertType("sys:strtonum", o1, otString);
-    assertType("sys:strtonum", o2, otFixnum);
+    assertType("str->fix", o1, otString);
+    assertType("str->fix", o2, otFixnum);
     string strValue = ((String*)o1)->getValue();
     long base = ((Fixnum*)o2)->getValue();
     stringstream sb;
     switch(base)
     {
-    case 2: error("sys:strtonum: Base 2 not implemented yet"); return NULL; // TODO
+    case 2: error("str->fix: Base 2 not implemented yet"); return NULL; // TODO
     case 8: sb << oct; break;
     case 10: sb << dec; break;
     case 16: sb << hex; break;
-    default: error("sys:strtonum: Invalid base"); return NULL;
+    default: error("str->fix: Invalid base"); return NULL;
     }
 
     sb << strValue;
-    // TODO: Make sure the string consists of digits and a single period only!
-    bool hasPeriod = strValue.find('.') != string::npos;
     long lValue;
-    if (!hasPeriod && sb >> lValue) return (Object*) new Fixnum(lValue);
-    sb.clear();
-    double dValue;
-    if (sb >> dValue) return (Object*) new Flonum(dValue);
-    sb.clear();
+    char c;
+    if (sb >> lValue && !(sb.get(c))) return (Object*) new Fixnum(lValue);
     return Symbol::fromString("nan");
 }
 
-Object *sysNumToStr(Object *o1, Object *o2)
+Object *sysFixToStr(Object *o1, Object *o2)
 {
     stringstream sb;
-    assertType("sys:numtostr", o2, otFixnum);
+    assertType("fix->str", o1, otFixnum);
+    assertType("fix->str", o2, otFixnum);
     long base = ((Fixnum*)o2)->getValue();
 
     switch(base)
     {
-    case 2: error("sys:numtostr: Base 2 not implemented yet"); return NULL; // TODO
+    case 2: error("fix->str: Base 2 not implemented yet"); return NULL; // TODO
     case 8: sb << oct; break;
     case 10: sb << dec; break;
     case 16: sb << hex; break;
-    default: error("sys:numtostr: Invalid base"); return NULL;
+    default: error("fix->str: Invalid base"); return NULL;
     }
 
-    if (o1->getType() == otFixnum) sb << ((Fixnum*)o1)->getValue();
-    else if (o1->getType() == otFlonum) sb << ((Flonum*)o1)->getValue();
-    else error("sys:numtostr: Invalid argument type");
-
+    sb << ((Fixnum*)o1)->getValue();
     string sValue;
     sb >> sValue;
     vector<int> characters;
@@ -993,11 +962,13 @@ class Interpreter
 public:
     Interpreter()
     {
+        _global.define("print-eval-forms", (Object*) Null::getInstance());
+
         DEFUN1(car, "car");
         DEFUN1(cdr, "cdr");
-        DEFUN1(sysType, "sys:type");
-        DEFUN1(sysTag, "sys:tag");
-        DEFUN1(sysUntag, "sys:untag");
+        DEFUN1(sysType, "type");
+        DEFUN1(sysTag, "tag");
+        DEFUN1(sysUntag, "untag");
         DEFUN1(integerToChar, "integer->char");
         DEFUN1(charToInteger, "char->integer");
         DEFUN1(stringLength, "string-length");
@@ -1006,26 +977,35 @@ public:
         DEFUN1(vectorLength, "vector-length");
         DEFUN1(makeString, "make-string");
         DEFUN1(makeVector, "make-vector");
-        DEFUN1(sysDisplayString, "sys:display-string");
-        DEFUN1(sysExit, "sys:exit");
+        DEFUN1(sysDisplayString, "display-string");
+        DEFUN1(sysExit, "exit");
+        DEFUN1(sysStrToFlo, "str->flo");
+        DEFUN1(sysFloToStr, "flo->str");
+        DEFUN1(sysFixToFlo, "fix->flo");
 
         DEFUN2(cons, "cons");
         DEFUN2(setCar, "set-car!");
         DEFUN2(setCdr, "set-cdr!");
-        DEFUN2(mathPlus, "+");
-        DEFUN2(mathMinus, "-");
-        DEFUN2(mathMult, "*");
-        DEFUN2(mathDiv, "/");
-        DEFUN2(mathLt, "<");
-        DEFUN2(mathEq, "=");
-        DEFUN2(mathQuotient, "quotient");
-        DEFUN2(mathRemainder, "remainder");
+        DEFUN2(fixPlus, "fix+");
+        DEFUN2(fixMinus, "fix-");
+        DEFUN2(fixMult, "fix*");
+        DEFUN2(fixDiv, "fix/");
+        DEFUN2(fixLt, "fix<");
+        DEFUN2(fixEq, "fix=");
+        DEFUN2(fixMod, "fix%");
+        DEFUN2(floPlus, "flo+");
+        DEFUN2(floMinus, "flo-");
+        DEFUN2(floMult, "flo*");
+        DEFUN2(floDiv, "flo/");
+        DEFUN2(floLt, "flo<");
+        DEFUN2(floEq, "flo=");
+//TODO        DEFUN2(floMod, "flo%");
         DEFUN2(eq, "eq?");
-        DEFUN2(apply, "apply");
+        DEFUN2(apply, "sys:apply");
         DEFUN2(stringRef, "string-ref");
         DEFUN2(vectorRef, "vector-ref");
-        DEFUN2(sysStrToNum, "sys:strtonum");
-        DEFUN2(sysNumToStr, "sys:numtostr");
+        DEFUN2(sysStrToFix, "str->fix");
+        DEFUN2(sysFixToStr, "fix->str");
 
         DEFUN3(stringSet, "string-set!");
         DEFUN3(vectorSet, "vector-set!");
@@ -1049,7 +1029,8 @@ public:
     Object* evalExpandedForm(Object *form, Environment *env)
     {
 tailCall:
-        //cout << "evalExpandedForm: " << form->toString() << endl;
+        if (_global.get("print-eval-forms")->getType() != otNull)
+            cout << "evalExpandedForm: " << form->toString() << endl;
 
         switch (form->getType())
         {
