@@ -1342,8 +1342,20 @@ str->fix ; number, base -> fixnum or 'nan
         (fold (lambda (i acc) (i env))
               'undefined
               lst))))
+  (define (analyze-variable-define-special-form form)
+    (if (= 2 (length form))
+        (let ((var-name (car form))
+              (value (analyze (cadr form))))
+          (if (symbol? var-name)
+              (lambda (env) ((env 'define) var-name (value env)))
+              (error "Invalid define form: Variable name must be a symbol")))
+        (error "Invalid define form: Expected 2 parameters")))
   (define (analyze-define-special-form form)
-    (lambda (env) (error "TODO eval: define form not implemented yet")))
+    (if (< 2 (length form))
+        (error "Invalid define form: Expected >= 2 parameters")
+        (if (pair? (car form))
+            (lambda (env) (error "TODO eval: No procedure defines yet!"))
+            (analyze-variable-define-special-form form))))
   (define (analyze-if-special-form form)
     (if (= 3 (length form))
         (let ((condition (analyze (car form)))
@@ -1923,17 +1935,18 @@ str->fix ; number, base -> fixnum or 'nan
 
 (assert (= 42 ((eval '(lambda (x) x) (null-environment 5)) 42)))
 
-(eval '(begin
-         (define test
-           (lambda (x)
-             (if (< x 10)
-                 (begin
-                   (display x)
-                   (test (+ x 1)))
-                 'ok)))
-         (test 0))
-      (scheme-report-environment 5))
+(assert (eq? 'ok
+             (eval '(begin
+                      (define test
+                              (lambda (x)
+                                (if (< x 10)
+                                    (begin
+                                      (display x)
+                                      (test (+ x 1)))
+                                    'ok)))
+                      (test 0))
+                   (scheme-report-environment 5))))
 
-(eval '(display "OK\n")
+(eval '(display "\nOK\n")
       (scheme-report-environment 5))
 
