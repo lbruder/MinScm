@@ -31,7 +31,7 @@ using namespace std;
 
 //----------------------------------------------------------------------------------------------------------------------
 
-#define error(msg) throw msg
+#define error(msg) do { cout << msg << endl; throw 0; } while(0)
 
 enum ObjectType { otFixnum, otFlonum, otSymbol, otPair, otString, otBoolean, otChar, otNull, otProcedure, otVector, otEof, otEnvironment, otTag };
 
@@ -1316,13 +1316,8 @@ int main()
             }
             cout << interp.eval(expression)->toString() << endl;
         }
-        catch(string& message)
+        catch(int message)
         {
-            cout << "Error: " << message << endl;
-        }
-        catch(char* message)
-        {
-            cout << "Error: " << message << endl;
         }
     }
     return 0;

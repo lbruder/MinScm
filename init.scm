@@ -77,7 +77,7 @@ str->fix ; number, base -> fixnum or 'nan
 ; - TODO: Add unit tests! Check all of R5RS. Everything working correctly?
 ; - TODO: or, named let, do loops, let*, letrec...
 ; - TODO: Signed numbers and rationals in reader
-; - TODO: eval
+; - TODO: eval has no define form yet
 
 ; As of now, deviations from R5RS are:
 ; - Re-defining builtins may (and very probably will) break your program
@@ -1357,15 +1357,15 @@ str->fix ; number, base -> fixnum or 'nan
   (define (analyze-lambda-special-form form)
     (if (< (length form) 2)
         (error "Invalid lambda form")
-        (let ((parameter-names '())
-              (has-rest-parameter #f))
-          (cond ((symbol? (car form)) (set! parameter-names (list (car form)))
-                                      (set! has-rest-parameter #t))
-                ((null? (car form)) 'nothing-to-do)
-                ((pair? (car form)) (set! parameter-names (make-proper-list (car form)))
-                                    (set! has-rest-parameter (dotted-list? (car form))))
-                (else (error "Invalid lambda form")))
-          (lambda (env) (make-closure "lambda" has-rest-parameter parameter-names env (cdr form))))))
+        (let ((parameter-names (car form))
+              (body (map analyze (cdr form))))
+          (lambda (captured-env)
+            (lambda args
+              (let ((env (make-environment captured-env)))
+                ((env 'extend) 'lambda parameter-names args)
+                (fold (lambda (i acc) (i env))
+                      'undefined
+                      body)))))))
   (define (analyze-quote-special-form form)
     (if (null? (cdr form))
         (lambda (env) (car form))
@@ -1633,9 +1633,25 @@ str->fix ; number, base -> fixnum or 'nan
       (let ((ret (assq var alist)))
         (cond (ret (set-cdr! ret value))
               (else (set! alist (cons (cons var value) alist))))))
+    (define (list-vars)
+      alist)
+    (define (extend procedure names values)
+      (if (pair? names)
+          (if (pair? values)
+              (begin
+                (define-var (car names) (car values))
+                (extend procedure (cdr names) (cdr values)))
+              (error procedure ": Invalid parameter count"))
+          (if (null? names)
+              (if (null? values)
+                  'undefined
+                  (error procedure ": Invalid parameter count"))
+              (define-var names values))))
     (lambda (command)
       (cond ((eq? command 'get) get-var)
             ((eq? command 'set) set-var)
+            ((eq? command 'list) list-vars)
+            ((eq? command 'extend) extend)
             ((eq? command 'define) define-var)))))
 
 (define (null-environment version)
@@ -1887,3 +1903,15 @@ str->fix ; number, base -> fixnum or 'nan
   ((env 'define) 'test 42)
   (eval '(set! test 23) env)
   (assert (= 23 ((env 'get) 'test))))
+
+(let ((env (null-environment 5)))
+  ((env 'extend) 'test '(a b c) '(1 2 3))
+  (assert (= 1 ((env 'get) 'a)))
+  (assert (= 2 ((env 'get) 'b)))
+  (assert (= 3 ((env 'get) 'c))))
+
+(let ((env (null-environment 5)))
+  ((env 'extend) 'test '(a . b) '(1 2 3))
+  (assert (= 1 ((env 'get) 'a)))
+  (assert (equal? '(2 3) ((env 'get) 'b))))
+
