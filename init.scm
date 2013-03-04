@@ -1342,8 +1342,8 @@ str->fix ; number, base -> fixnum or 'nan
         (fold (lambda (i acc) (i env))
               'undefined
               lst))))
-  (define (analyze-define-special-form form env)
-    'TODO)
+  (define (analyze-define-special-form form)
+    (lambda (env) (error "TODO eval: define form not implemented yet")))
   (define (analyze-if-special-form form)
     (if (= 3 (length form))
         (let ((condition (analyze (car form)))
@@ -1378,6 +1378,10 @@ str->fix ; number, base -> fixnum or 'nan
               (lambda (env) ((env 'set) var-name (value env)))
               (error "Invalid set! form: Variable name must be a symbol")))
         (error "Invalid set! form: Expected 2 parameters")))
+  (define (analyze-funcall form)
+    (let ((f (analyze (car form)))
+          (arguments (map analyze (cdr form))))
+      (lambda (env) (apply (f env) (map (lambda (i) (i env)) arguments)))))
   (define (analyze-pair form)
     (let ((f (car form)))
       (cond ((eq? f 'begin)  (analyze-begin-special-form  (cdr form)))
@@ -1873,6 +1877,8 @@ str->fix ; number, base -> fixnum or 'nan
 
 ; Unit tests ------------------------------------------------------------------
 
+(display "Running self tests...\n")
+
 (define (perform-assertion name condition)
   (if condition
       'ok
@@ -1914,4 +1920,20 @@ str->fix ; number, base -> fixnum or 'nan
   ((env 'extend) 'test '(a . b) '(1 2 3))
   (assert (= 1 ((env 'get) 'a)))
   (assert (equal? '(2 3) ((env 'get) 'b))))
+
+(assert (= 42 ((eval '(lambda (x) x) (null-environment 5)) 42)))
+
+(eval '(begin
+         (define test
+           (lambda (x)
+             (if (< x 10)
+                 (begin
+                   (display x)
+                   (test (+ x 1)))
+                 'ok)))
+         (test 0))
+      (scheme-report-environment 5))
+
+(eval '(display "OK\n")
+      (scheme-report-environment 5))
 
