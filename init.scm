@@ -1,9 +1,9 @@
 ; vim:lisp:et:ai
 
-; init.scm version 2013-03-01
+; init.scm version 2013-03-04
 ; A minimal Scheme library
 ; This is an effort to create a small library of Scheme procedures
-; as defined in R4RS (currently) with parts of SRFI-1.
+; as defined in R5RS with parts of SRFI-1.
 ; It can be used in minimal Scheme implementations for quick and easy porting
 ; or just to toy around and experiment with the language.
 ; Focus on size and readability, not on performance: If you need speed, use
@@ -71,50 +71,29 @@ fix->str ; number, base -> string
 str->fix ; number, base -> fixnum or 'nan
 
 ; ----------------------------------------------------------------------------
-; MISSING STUFF
+; LIMITATIONS, MISSING STUFF
 ; ----------------------------------------------------------------------------
 
-; - TODO: Re-defining builtins may (and very probably will) break your program
-; - TODO: Add unit tests! Check all of R4RS. Everything working correctly?
-; - TODO: vector and string functions are eerily similar...
+; - TODO: Add unit tests! Check all of R5RS. Everything working correctly?
 ; - TODO: or, named let, do loops, let*, letrec...
 ; - TODO: Signed numbers and rationals in reader
 ; - TODO: eval
 
-; As of now, deviations from R4RS chapter 6 are:
+; As of now, deviations from R5RS are:
+; - Re-defining builtins may (and very probably will) break your program
+; - No hygienic macros yet
+; - Numerical tower consists of fixnum => rational => flonum, no bigints or
+;   complex numbers yet
+; - Character procedures consider the ASCII charset only
 ; - (append) created lists do not share the last argument, dotted lists
 ;   don't work yet
-; - Distinction between rational and real, not between exact and inexact
-; - Numerical tower consists of fixnum => rational => flonum, no bigints or
-;   complex numbers (yet)
-; - Character procedures consider the ASCII charset only
 ; - (map), (for-each), (filter), (every), (any) take two arguments, not
 ;   an arbitrary number
 ; - No support for nor dependency on call/cc
-; - No Ports (chapter 6.10) yet
+; - No Ports yet
 
-; Functions missing completely from R4RS:
-; - (floor)
-; - (ceiling)
-; - (truncate)
-; - (round)
-; - (rationalize)
-; - (exp)
-; - (expt)
-; - (log)
-; - (sin)
-; - (cos)
-; - (tan)
-; - (asin)
-; - (acos)
-; - (atan)
-; - (make-rectangular)
-; - (make-polar)
-; - (real-part)
-; - (imag-part)
-; - (magnitude)
-; - (angle)
-; - (inexact->exact)
+; For an overview of all procedures currently missing from R5RS, see the
+; definition of report-procedures further below.
 
 ; ----------------------------------------------------------------------------
 ; INTEGRATED COMPILER
@@ -277,7 +256,7 @@ str->fix ; number, base -> fixnum or 'nan
 (define (cdddar x) (cdr (cdr (cdr (car x)))))
 (define (cddddr x) (cdr (cdr (cdr (cdr x)))))
 
-(define (apply f lst) (sys:apply f lst)) ; Turn the special form into a procedure
+(define (apply f lst) (sys:apply f lst)) ; The compiler treats sys:apply as a special form, so turn it into a procedure
 (define (list . lst) lst)
 
 (define (not x)
@@ -1223,19 +1202,13 @@ str->fix ; number, base -> fixnum or 'nan
 
 ; Output functions ------------------------------------------------------------
 
-(define (display . args)
-  (for-each (lambda (i) (display-string (object->string i #f)))
-            args))
+(define (display value)
+  (display-string (object->string value #f)))
 
-(define (write . args)
-  (for-each (lambda (i) (display-string (object->string i #t)))
-            args))
+(define (write value)
+  (display-string (object->string value #t)))
 
 (define (newline) (display "\n"))
-
-(define (print . args)
-  (write args)
-  (newline))
 
 ; Reader ----------------------------------------------------------------------
 
@@ -1359,6 +1332,333 @@ str->fix ; number, base -> fixnum or 'nan
 (define (read s)
   (let ((stream (make-string-reader s)))
     ((stream 'get-object) #f)))
+
+; Interpreter -----------------------------------------------------------------
+
+(define (analyze form)
+  (define (analyze-begin-special-form form)
+    (let ((lst (map analyze form)))
+      (lambda (env)
+        (fold (lambda (i acc) (i env))
+              'undefined
+              lst))))
+  (define (analyze-define-special-form form env)
+    'TODO)
+  (define (analyze-if-special-form form)
+    (if (= 3 (length form))
+        (let ((condition (analyze (car form)))
+              (then-part (analyze (cadr form)))
+              (else-part (analyze (caddr form))))
+          (lambda (env)
+            (if (condition env)
+                (then-part env)
+                (else-part env))))
+        (error "Invalid if form: Expected 3 parameters")))
+  (define (analyze-lambda-special-form form)
+    (if (< (length form) 2)
+        (error "Invalid lambda form")
+        (let ((parameter-names '())
+              (has-rest-parameter #f))
+          (cond ((symbol? (car form)) (set! parameter-names (list (car form)))
+                                      (set! has-rest-parameter #t))
+                ((null? (car form)) 'nothing-to-do)
+                ((pair? (car form)) (set! parameter-names (make-proper-list (car form)))
+                                    (set! has-rest-parameter (dotted-list? (car form))))
+                (else (error "Invalid lambda form")))
+          (lambda (env) (make-closure "lambda" has-rest-parameter parameter-names env (cdr form))))))
+  (define (analyze-quote-special-form form)
+    (if (null? (cdr form))
+        (lambda (env) (car form))
+        (error "Invalid quote form: Expected 1 parameter")))
+  (define (analyze-set-special-form form)
+    (if (= 2 (length form))
+        (let ((var-name (car form))
+              (value (analyze (cadr form))))
+          (if (symbol? var-name)
+              (lambda (env) ((env 'set) var-name (value env)))
+              (error "Invalid set! form: Variable name must be a symbol")))
+        (error "Invalid set! form: Expected 2 parameters")))
+  (define (analyze-pair form)
+    (let ((f (car form)))
+      (cond ((eq? f 'begin)  (analyze-begin-special-form  (cdr form)))
+            ((eq? f 'define) (analyze-define-special-form (cdr form)))
+            ((eq? f 'if)     (analyze-if-special-form     (cdr form)))
+            ((eq? f 'lambda) (analyze-lambda-special-form (cdr form)))
+            ((eq? f 'quote)  (analyze-quote-special-form  (cdr form)))
+            ((eq? f 'set!)   (analyze-set-special-form    (cdr form)))
+            (else            (analyze-funcall form)))))
+  (cond ((pair? form) (analyze-pair form))
+        ((symbol? form) (lambda (env) ((env 'get) form)))
+        (else (lambda (env) form))))
+
+(define (eval form env)
+  ((analyze form) env))
+
+; Environments ----------------------------------------------------------------
+
+(define report-procedures
+  (list (list '+ +)
+        (list '- -)
+        (list '* *)
+        (list '/ /)
+        (list '< <)
+        (list '> >)
+        (list '<= <=)
+        (list '>= >=)
+        (list '= =)
+        (list 'abs abs)
+        ; TODO: acos
+        ; TODO: angle
+        (list 'append append)
+        (list 'apply apply)
+        ; TODO: asin
+        (list 'assoc assoc)
+        (list 'assq assq)
+        (list 'assv assv)
+        ; TODO: atan
+        (list 'boolean? boolean?)
+        ; TODO: call-with-current-continuation
+        ; TODO: call-with-input-file
+        ; TODO: call-with-output-file
+        ; TODO: call-with-values
+        (list 'car car)
+        (list 'cdr cdr)
+        (list 'caar caar) 
+        (list 'cadr cadr)
+        (list 'cdar cdar)
+        (list 'cddr cddr)
+        (list 'caaar caaar)
+        (list 'caadr caadr)
+        (list 'cadar cadar)
+        (list 'caddr caddr)
+        (list 'cdaar cdaar)
+        (list 'cdadr cdadr)
+        (list 'cddar cddar)
+        (list 'cdddr cdddr)
+        (list 'caaaar caaaar)
+        (list 'caaadr caaadr)
+        (list 'caadar caadar)
+        (list 'caaddr caaddr)
+        (list 'cadaar cadaar)
+        (list 'cadadr cadadr)
+        (list 'caddar caddar)
+        (list 'cadddr cadddr)
+        (list 'cdaaar cdaaar)
+        (list 'cdaadr cdaadr)
+        (list 'cdadar cdadar)
+        (list 'cdaddr cdaddr)
+        (list 'cddaar cddaar)
+        (list 'cddadr cddadr)
+        (list 'cdddar cdddar)
+        (list 'cddddr cddddr)
+        ; TODO: ceiling
+        (list 'char->integer char->integer)
+        (list 'char-alphabetic? char-alphabetic?)
+        (list 'char-ci<=? char-ci<=?)
+        (list 'char-ci<? char-ci<?)
+        (list 'char-ci=? char-ci=?)
+        (list 'char-ci>=? char-ci>=?)
+        (list 'char-ci>? char-ci>?)
+        (list 'char-downcase char-downcase)
+        (list 'char-lower-case? char-lower-case?)
+        (list 'char-numeric? char-numeric?)
+        ; TODO: char-ready?
+        (list 'char-upcase char-upcase)
+        (list 'char-upper-case? char-upper-case?)
+        (list 'char-whitespace? char-whitespace?)
+        (list 'char<=? char<=?)
+        (list 'char<? char<?)
+        (list 'char=? char=?)
+        (list 'char>=? char>=?)
+        (list 'char>? char>?)
+        (list 'char? char?)
+        ; TODO: close-input-port
+        ; TODO: close-output-port
+        (list 'complex? complex?)
+        (list 'cons cons)
+        ; TODO: cos
+        ; TODO: current-input-port
+        ; TODO: current-output-port
+        (list 'denominator denominator)
+        (list 'display display)
+        ; TODO: dynamic-wind
+        ; TODO: eof-object?
+        (list 'eq? eq?)
+        (list 'equal? equal?)
+        (list 'eqv? eqv?)
+        (list 'eval eval)
+        (list 'even? even?)
+        (list 'exact->inexact exact->inexact)
+        (list 'exact? exact?)
+        ; TODO: exp
+        ; TODO: expt
+        ; TODO: floor
+        (list 'for-each for-each)
+        (list 'gcd gcd)
+        ; TODO: imag-part
+        ; TODO: inexact->exact
+        (list 'inexact? inexact?)
+        ; TODO: input-port?
+        (list 'integer->char integer->char)
+        (list 'integer? integer?)
+        (list 'lcm lcm)
+        (list 'length length)
+        (list 'list list)
+        (list 'list->string list->string)
+        (list 'list->vector list->vector)
+        (list 'list-ref list-ref)
+        (list 'list-tail list-tail)
+        (list 'list? list?)
+        ; TODO: log
+        ; TODO: magnitude
+        ; TODO: make-polar
+        ; TODO: make-rectangular
+        (list 'make-string make-string)
+        (list 'make-vector make-vector)
+        (list 'map map)
+        (list 'max max)
+        (list 'member member)
+        (list 'memq memq)
+        (list 'memv memv)
+        (list 'min min)
+        (list 'modulo modulo)
+        (list 'negative? negative?)
+        (list 'newline newline)
+        (list 'not not)
+        (list 'null? null?)
+        (list 'number->string number->string)
+        (list 'number? number?)
+        (list 'numerator numerator)
+        (list 'odd? odd?)
+        ; TODO: open-input-file
+        ; TODO: open-output-file
+        ; TODO: output-port?
+        (list 'pair? pair?)
+        ; TODO: peek-char
+        ; TODO: port?
+        (list 'positive? positive?)
+        (list 'procedure? procedure?)
+        (list 'quotient quotient)
+        (list 'rational? rational?)
+        ; TODO: rationalize
+        ; TODO: read
+        ; TODO: read-char
+        ; TODO: real-part
+        (list 'real? real?)
+        (list 'remainder remainder)
+        (list 'reverse reverse)
+        ; TODO: round
+        ; TODO: separate
+        (list 'set-car! set-car!)
+        (list 'set-cdr! set-cdr!)
+        ; TODO: sin
+        (list 'sqrt sqrt)
+        (list 'string string)
+        (list 'string->list string->list)
+        (list 'string->number string->number)
+        (list 'string->symbol string->symbol)
+        (list 'string-append string-append)
+        (list 'string-ci<=? string-ci<=?)
+        (list 'string-ci>=? string-ci>=?)
+        (list 'string-ci<? string-ci<?)
+        (list 'string-ci>? string-ci>?)
+        (list 'string-ci=? string-ci=?)
+        (list 'string-copy string-copy)
+        (list 'string-fill! string-fill!)
+        (list 'string-length string-length)
+        (list 'string-ref string-ref)
+        (list 'string-set! string-set!)
+        (list 'string<=? string<=?)
+        (list 'string>=? string>=?)
+        (list 'string<? string<?)
+        (list 'string>? string>?)
+        (list 'string=? string=?)
+        (list 'string? string?)
+        (list 'substring substring)
+        (list 'symbol->string symbol->string)
+        (list 'symbol? symbol?)
+        ; TODO: table
+        ; TODO: tan
+        ; TODO: truncate
+        ; TODO: values
+        (list 'vector vector)
+        (list 'vector->list vector->list)
+        (list 'vector-fill! vector-fill!)
+        (list 'vector-length vector-length)
+        (list 'vector-ref vector-ref)
+        (list 'vector-set! vector-set!)
+        (list 'vector? vector?)
+        (list 'write write)
+        ; TODO: write-char
+        (list 'zero? zero?)))
+
+(define interaction-procedures
+  (list (list 'any any)
+        (list 'char-digit-or-period? char-digit-or-period?)
+        (list 'dotted-list? dotted-list?)
+        (list 'drop-while drop-while)
+        (list 'error error)
+        (list 'every every)
+        (list 'filter filter)
+        (list 'find find)
+        (list 'find-tail find-tail)
+        (list 'flip flip)
+        (list 'fold fold)
+        (list 'force force)
+        (list 'last last)
+        (list 'last-pair last-pair)
+        (list 'make-promise make-promise)
+        (list 'make-proper-list make-proper-list)
+        (list 'promise? promise?)
+        (list 'range range)
+        (list 'reduce reduce)
+        (list 'sign sign)
+        (list 'sort sort)
+        (list 'take take)
+        (list 'take-while take-while)))
+
+(define (make-environment outer) ; HACK: Move from alist to tree structure or hashes
+  (let ((alist '()))
+    (define (get-var var)
+      (let ((ret (assq var alist)))
+        (cond (ret (cdr ret))
+              ((null? outer) (error "Unknown variable: " var))
+              (else ((outer 'get) var)))))
+    (define (set-var var value)
+      (let ((ret (assq var alist)))
+        (cond (ret (set-cdr! ret value))
+              ((null? outer) (error "Unknown variable: " var))
+              (else ((outer 'set) var value)))))
+    (define (define-var var value)
+      (let ((ret (assq var alist)))
+        (cond (ret (set-cdr! ret value))
+              (else (set! alist (cons (cons var value) alist))))))
+    (lambda (command)
+      (cond ((eq? command 'get) get-var)
+            ((eq? command 'set) set-var)
+            ((eq? command 'define) define-var)))))
+
+(define (null-environment version)
+  (if (= 5 version)
+      (make-environment '())
+      (error "null-environment: Only version 5 supported")))
+
+(define (scheme-report-environment version)
+  (if (= 5 version)
+      (let ((env (null-environment version)))
+        (for-each (lambda (p) (apply (env 'define) p))
+                  report-procedures)
+        ((env 'define) 'interaction-environment interaction-environment)
+        ((env 'define) 'null-environment null-environment)
+        ((env 'define) 'scheme-report-environment scheme-report-environment)
+        env)
+      (error "scheme-report-environment: Only version 5 supported")))
+
+(define (interaction-environment)
+  (let ((env (scheme-report-environment 5)))
+    (for-each (lambda (p) (apply (env 'define) p))
+              interaction-procedures)
+    env))
 
 ; Compiler --------------------------------------------------------------------
 
@@ -1532,17 +1832,16 @@ str->fix ; number, base -> fixnum or 'nan
                 (emit 'restore-registers))))
         (error "Invalid apply form: Expected 2 parameters")))
   (define (compile-funcall-or-special-form form tail-position)
-    (if (symbol? (car form))
-        (cond ((eq? (car form) 'begin)     (compile-begin-special-form    form tail-position))
-              ((eq? (car form) 'define)    (compile-define-special-form   form tail-position))
-              ((eq? (car form) 'defmacro)  (compile-defmacro-special-form form tail-position))
-              ((eq? (car form) 'if)        (compile-if-special-form       form tail-position))
-              ((eq? (car form) 'lambda)    (compile-lambda-special-form   form tail-position))
-              ((eq? (car form) 'quote)     (compile-quote-special-form    form tail-position))
-              ((eq? (car form) 'set!)      (compile-set-special-form      form tail-position))
-              ((eq? (car form) 'sys:apply) (compile-apply-special-form    form tail-position))
-              (else (compile-funcall form tail-position)))
-        (compile-funcall form tail-position)))
+    (let ((f (car form)))
+      (cond ((eq? f 'begin)     (compile-begin-special-form    form tail-position))
+            ((eq? f 'define)    (compile-define-special-form   form tail-position))
+            ((eq? f 'defmacro)  (compile-defmacro-special-form form tail-position))
+            ((eq? f 'if)        (compile-if-special-form       form tail-position))
+            ((eq? f 'lambda)    (compile-lambda-special-form   form tail-position))
+            ((eq? f 'quote)     (compile-quote-special-form    form tail-position))
+            ((eq? f 'set!)      (compile-set-special-form      form tail-position))
+            ((eq? f 'sys:apply) (compile-apply-special-form    form tail-position))
+            (else (compile-funcall form tail-position)))))
   (define (compile-form form tail-position)
     (cond ((symbol? form) (emit 'get-variable form))
           ((pair? form) (compile-funcall-or-special-form form tail-position))
@@ -1575,3 +1874,16 @@ str->fix ; number, base -> fixnum or 'nan
 (assert (> (/ 13 3) 4))
 (assert (< (/ 13 3) 5))
 
+(assert (= 5 (eval '(begin 1 2 3 4 5) (null-environment 5))))
+(assert (eq? 'asd (eval '(begin 1 2 3 4 5 (quote asd)) (null-environment 5))))
+(assert (= 1 (eval '(if #t 1 2) (null-environment 5))))
+(assert (= 2 (eval '(if #f 1 2) (null-environment 5))))
+
+(let ((env (null-environment 5)))
+  ((env 'define) 'test 42)
+  (assert (= 42 (eval 'test env))))
+
+(let ((env (null-environment 5)))
+  ((env 'define) 'test 42)
+  (eval '(set! test 23) env)
+  (assert (= 23 ((env 'get) 'test))))
