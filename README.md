@@ -7,7 +7,7 @@ Features: Tail calls, CL style macros, part of SRFI-1
 
 Copyright (c) 2013, Leif Bruder <leifbruder@gmail.com>
 
-This code will eventually evolve into a full-fledged Scheme environment based
+This code will eventually evolve into a full-fledged R5RS environment based
 on a portable C runtime and, running on top of it, an interpreter/compiler
 combo written in Scheme. At the moment it is nothing more than a highly
 experimental playground, so beware.

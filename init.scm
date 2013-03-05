@@ -1,6 +1,6 @@
 ; vim:lisp:et:ai
 
-; init.scm version 2013-03-04
+; init.scm version 2013-03-05
 ; A minimal Scheme library
 ; This is an effort to create a small library of Scheme procedures
 ; as defined in R5RS with parts of SRFI-1.
@@ -1350,11 +1350,30 @@ str->fix ; number, base -> fixnum or 'nan
               (lambda (env) ((env 'define) var-name (value env)))
               (error "Invalid define form: Variable name must be a symbol")))
         (error "Invalid define form: Expected 2 parameters")))
+  (define (make-lambda name captured-env parameter-names body)
+    (lambda args
+      (let ((env (make-environment captured-env)))
+           ((env 'extend) name parameter-names args)
+        (fold (lambda (i acc) (i env))
+              'undefined
+              body))))
+  (define (analyze-procedure-define-special-form form)
+    (if (> (length form) 2)
+        (let ((proc-name (caar form))
+              (parameter-names (cdar form))
+              (body (map analyze (cdr form))))
+          (if (every symbol? (make-proper-list (car form)))
+              (lambda (env)
+                ((env 'define) proc-name
+                               (make-lambda proc-name env parameter-names body))
+                'undefined)
+              (error "Invalid define form: Procedure and argument names must be symbols")))
+        (error "Invalid define form: Expected > 2 parameters")))
   (define (analyze-define-special-form form)
-    (if (< 2 (length form))
+    (if (< (length form) 2)
         (error "Invalid define form: Expected >= 2 parameters")
         (if (pair? (car form))
-            (lambda (env) (error "TODO eval: No procedure defines yet!"))
+            (analyze-procedure-define-special-form form)
             (analyze-variable-define-special-form form))))
   (define (analyze-if-special-form form)
     (if (= 3 (length form))
@@ -1372,12 +1391,7 @@ str->fix ; number, base -> fixnum or 'nan
         (let ((parameter-names (car form))
               (body (map analyze (cdr form))))
           (lambda (captured-env)
-            (lambda args
-              (let ((env (make-environment captured-env)))
-                ((env 'extend) 'lambda parameter-names args)
-                (fold (lambda (i acc) (i env))
-                      'undefined
-                      body)))))))
+            (make-lambda 'lambda captured-env parameter-names body)))))
   (define (analyze-quote-special-form form)
     (if (null? (cdr form))
         (lambda (env) (car form))
@@ -1633,7 +1647,7 @@ str->fix ; number, base -> fixnum or 'nan
         (list 'take take)
         (list 'take-while take-while)))
 
-(define (make-environment outer) ; HACK: Move from alist to tree structure or hashes
+(define (make-environment outer)
   (let ((alist '()))
     (define (get-var var)
       (let ((ret (assq var alist)))
@@ -1943,10 +1957,16 @@ str->fix ; number, base -> fixnum or 'nan
                                     (begin
                                       (display x)
                                       (test (+ x 1)))
-                                    'ok)))
-                      (test 0))
+                                    (newline))))
+                      (test 0)
+                      'ok)
                    (scheme-report-environment 5))))
 
-(eval '(display "\nOK\n")
+(eval '(begin
+         (define (a b . c) (display b) (newline) (display c) (newline))
+         (a 1 2 3 4 5))
+      (scheme-report-environment 5))
+
+(eval '(display "OK\n")
       (scheme-report-environment 5))
 
