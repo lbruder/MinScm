@@ -1,6 +1,6 @@
 // vim:et
 
-// MinScm.cpp version 2013-03-01
+// MinScm.cpp version 2013-03-25
 // An experimental Scheme subset interpreter in C++, based on SchemeNet.cs
 // Features: Tail calls, CL style macros, part of SRFI-1
 // Copyright (c) 2013, Leif Bruder <leifbruder@gmail.com>
@@ -484,6 +484,12 @@ public:
             case '\'':
                 readChar();
                 return (Object*) new Pair((Object*) Symbol::fromString("quote"), (Object*) new Pair(read(), (Object*) Null::getInstance()));
+            case '`':
+                readChar();
+                return (Object*) new Pair((Object*) Symbol::fromString("quasiquote"), (Object*) new Pair(read(), (Object*) Null::getInstance()));
+            case ',':
+                readChar();
+                return (Object*) new Pair((Object*) Symbol::fromString("unquote"), (Object*) new Pair(read(), (Object*) Null::getInstance()));
             case '(':
                 return readList();
             case '"':
@@ -1149,20 +1155,17 @@ private:
     void handleMacros(Object **obj)
     {
         if ((*obj)->getType() != otPair) return;
+        for (;;) if (!expandMacros(obj)) break;
         Pair *asPair = (Pair*) *obj;
         if (asPair->_car->getType() != otSymbol) return;
-        if (asPair->_car->toString() == "defmacro")
-        {
-            if (asPair->_cdr->getType() != otPair) error("Invalid defmacro form: Expected (defmacro name (parameters) form ...)");
-            if (((Pair*)asPair->_cdr)->_car->getType() != otSymbol) error("Invalid defmacro form: Name must be a symbol");
-            string name = ((Pair*)asPair->_cdr)->_car->toString();
-            if (((Pair*)asPair->_cdr)->_cdr->getType() != otPair) error("Invalid defmacro form");
-            _macros[name] = (Lambda*) evalLambda((Pair*)((Pair*)asPair->_cdr), &_global);
-            *obj = (Object*) Boolean::getTrue();
-            return;
-        }
+        if (asPair->_car->toString() != "defmacro") return;
 
-        for (;;) if (!expandMacros(obj)) break;
+        if (asPair->_cdr->getType() != otPair) error("Invalid defmacro form: Expected (defmacro name (parameters) form ...)");
+        if (((Pair*)asPair->_cdr)->_car->getType() != otSymbol) error("Invalid defmacro form: Name must be a symbol");
+        string name = ((Pair*)asPair->_cdr)->_car->toString();
+        if (((Pair*)asPair->_cdr)->_cdr->getType() != otPair) error("Invalid defmacro form");
+        _macros[name] = (Lambda*) evalLambda((Pair*)((Pair*)asPair->_cdr), &_global);
+        *obj = (Object*) Boolean::getTrue();
     }
 
     bool expandMacros(Object **obj)

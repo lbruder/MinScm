@@ -1,6 +1,6 @@
 ; vim:lisp:et:ai
 
-; init.scm version 2013-03-05
+; init.scm version 2013-03-26
 ; A minimal Scheme library
 ; This is an effort to create a small library of Scheme procedures
 ; as defined in R5RS with parts of SRFI-1.
@@ -75,9 +75,13 @@ str->fix ; number, base -> fixnum or 'nan
 ; ----------------------------------------------------------------------------
 
 ; - TODO: Add unit tests! Check all of R5RS. Everything working correctly?
-; - TODO: or, named let, do loops, let*, letrec...
+; - TODO: or, named let, letrec...
 ; - TODO: Signed numbers and rationals in reader
 ; - TODO: eval has no define form yet
+; - TODO: string->number should return #f if argument not a number
+; - TODO: if form should have an optional else-part
+; - TODO: read... should return the eof-object? instead of an error
+; - TODO: Add quasiquoting to reader!
 
 ; As of now, deviations from R5RS are:
 ; - Re-defining builtins may (and very probably will) break your program
@@ -283,6 +287,16 @@ str->fix ; number, base -> fixnum or 'nan
 (define (reverse lst)
   (fold cons '() lst))
 
+(define (reverse! lst)
+  (define (iter i prev next)
+    (if (null? i)
+        prev
+        (begin
+          (set! next (cdr i))
+          (set-cdr! i prev)
+          (iter next i #f))))
+  (iter lst '() #f))
+
 (define (for-each f lst)
   (fold (lambda (i acc) (f i))
         '()
@@ -290,21 +304,81 @@ str->fix ; number, base -> fixnum or 'nan
   'undefined)
 
 (define (map f lst) ; HACK: Simple but slow
-  (reverse
+  (reverse!
     (fold (lambda (i acc) (cons (f i) acc))
           '()
           lst)))
 
 (define (filter f lst) ; HACK: Simple but slow
-  (reverse
+  (reverse!
     (fold (lambda (i acc) (if (f i) (cons i acc) acc))
           '()
           lst)))
+
+(defmacro quasiquote (x)
+  (define (qq i)
+    (if (pair? i)
+      (if (eq? 'unquote (car i))
+          (cadr i)
+          (cons 'list (map qq i)))
+      (list 'quote i)))
+    (qq x))
+
+(defmacro dolist (lst . forms)
+  (list 'for-each
+        (cons 'lambda
+              (cons (list (car lst))
+                    forms))
+        (cadr lst)))
+
+(define (sys:count upto f)
+  (define (iter i)
+    (if (= i upto)
+      'undefined
+      (begin
+        (f i)
+        (iter (+ i 1)))))
+  (iter 0))
+
+(defmacro dotimes (lst . body)
+  (list 'sys:count
+        (cadr lst)
+        (cons 'lambda
+              (cons (list (car lst))
+                    body))))
 
 (defmacro let (lst . forms)
   (cons
     (cons 'lambda (cons (map car lst) forms))
     (map cadr lst)))
+
+(defmacro let* (lst . forms)
+  (if (null? lst)
+      (cons 'begin forms)
+      (list 'let (list (car lst))
+        (cons 'let* (cons (cdr lst) forms)))))
+
+(defmacro when (expr . body)
+  `(if ,expr
+       ,(cons 'begin body)
+       #f))
+
+(defmacro unless (expr . body) 
+  `(if ,expr 
+       #f 
+       ,(cons 'begin body)))
+
+(defmacro aif (expr then . rest) 
+  `(let ((it ,expr)) 
+     (if it 
+         ,then 
+         ,(if (null? rest) #f (car rest)))))
+
+(defmacro awhen (expr . then) 
+  `(let ((it ,expr)) 
+     (if it 
+         ,(cons 'begin then) 
+         #f)))
 
 (defmacro cond list-of-forms
   (define (expand-cond lst)
@@ -341,8 +415,32 @@ str->fix ; number, base -> fixnum or 'nan
         acc
         (iter (cdr current)
               (cons (car current) acc))))
-  (reverse
+  (reverse!
     (fold iter '() lsts)))
+
+(define gensym
+  (let ((sym 0))
+    (lambda ()
+      (set! sym (+ sym 1))
+      (string->symbol (string-append "##gensym##" (number->string sym))))))
+
+(defmacro do (vars pred . body)
+  (let ((symbol (gensym)))
+    `(let ((,symbol '()))
+       (set! ,symbol (lambda ,(map car vars)
+                       (if ,(car pred)
+                           ,(cadr pred)
+                           ,(cons 'begin
+                                  (append body
+                                          (list (cons symbol
+                                                      (map caddr vars))))))))
+       ,(cons symbol (map cadr vars)))))
+
+(defmacro while (exp . body)
+  (cons 'do
+        (cons '()
+              (cons `((not ,exp) 'undefined)
+                    body))))
 
 (define (last-pair lst)
   (if (null? (cdr lst))
@@ -383,6 +481,13 @@ str->fix ; number, base -> fixnum or 'nan
     (cond ((null? l) acc)
           ((f (car l)) (iter (cdr l) (cons (car l) acc)))
           (else acc)))
+  (reverse! (iter lst '())))
+
+(define (flatten lst)
+  (define (iter i acc)
+    (cond ((null? i) acc)
+          ((pair? (car i)) (iter (cdr i) (iter (car i) acc)))
+          (else (iter (cdr i) (cons (car i) acc)))))
   (reverse (iter lst '())))
 
 ; Bigints --------------------------------------------------------------------
@@ -1005,7 +1110,7 @@ str->fix ; number, base -> fixnum or 'nan
     (cond ((null? l) acc)
           ((zero? totake) acc)
           (else (iter (cdr l) (- totake 1) (cons (car l) acc)))))
-  (reverse (iter lst i '())))
+  (reverse! (iter lst i '())))
 
 (define drop list-tail)
 
@@ -1040,7 +1145,7 @@ str->fix ; number, base -> fixnum or 'nan
     (cond ((pair? i) (iter (cdr i) (cons (car i) acc)))
           ((null? i) acc)
           (else (cons i acc))))
-  (reverse (iter lst '())))
+  (reverse! (iter lst '())))
 
 ; Augment operators to take an arbitrary number of arguments -----------------
 
@@ -1164,7 +1269,7 @@ str->fix ; number, base -> fixnum or 'nan
             ((eq? command 'add-number) add-number)
             ((eq? command 'get) get-value)
             ((eq? command 'get-reverse) get-reverse)
-            (else (error "string-writer: Unknown command"))))))
+            (else (error "string-writer: Unknown command " command))))))
 
 (define (add-pair-to-string-writer obj stream readable)
   (define (iter i)
@@ -1209,6 +1314,10 @@ str->fix ; number, base -> fixnum or 'nan
   (display-string (object->string value #t)))
 
 (define (newline) (display "\n"))
+
+(define (print . args)
+  (for-each display (flatten args))
+  (newline))
 
 ; Reader ----------------------------------------------------------------------
 
@@ -1327,7 +1436,7 @@ str->fix ; number, base -> fixnum or 'nan
             ((eq? command 'get-object) get-object)
             ((eq? command 'skip-whitespace) skip-whitespace)
             ((eq? command 'skip-line) skip-line)
-            (else (error "string-reader: Unknown command"))))))
+            (else (error "string-reader: Unknown command " command))))))
 
 (define (read s)
   (let ((stream (make-string-reader s)))
@@ -1375,6 +1484,8 @@ str->fix ; number, base -> fixnum or 'nan
         (if (pair? (car form))
             (analyze-procedure-define-special-form form)
             (analyze-variable-define-special-form form))))
+  (define (analyze-defmacro-special-form form)
+    (error "defmacro: No macro support yet!")) ; TODO
   (define (analyze-if-special-form form)
     (if (= 3 (length form))
         (let ((condition (analyze (car form)))
@@ -1410,13 +1521,14 @@ str->fix ; number, base -> fixnum or 'nan
       (lambda (env) (apply (f env) (map (lambda (i) (i env)) arguments)))))
   (define (analyze-pair form)
     (let ((f (car form)))
-      (cond ((eq? f 'begin)  (analyze-begin-special-form  (cdr form)))
-            ((eq? f 'define) (analyze-define-special-form (cdr form)))
-            ((eq? f 'if)     (analyze-if-special-form     (cdr form)))
-            ((eq? f 'lambda) (analyze-lambda-special-form (cdr form)))
-            ((eq? f 'quote)  (analyze-quote-special-form  (cdr form)))
-            ((eq? f 'set!)   (analyze-set-special-form    (cdr form)))
-            (else            (analyze-funcall form)))))
+      (cond ((eq? f 'begin)    (analyze-begin-special-form    (cdr form)))
+            ((eq? f 'define)   (analyze-define-special-form   (cdr form)))
+            ((eq? f 'defmacro) (analyze-defmacro-special-form (cdr form)))
+            ((eq? f 'if)       (analyze-if-special-form       (cdr form)))
+            ((eq? f 'lambda)   (analyze-lambda-special-form   (cdr form)))
+            ((eq? f 'quote)    (analyze-quote-special-form    (cdr form)))
+            ((eq? f 'set!)     (analyze-set-special-form      (cdr form)))
+            (else              (analyze-funcall form)))))
   (cond ((pair? form) (analyze-pair form))
         ((symbol? form) (lambda (env) ((env 'get) form)))
         (else (lambda (env) form))))
@@ -1632,6 +1744,7 @@ str->fix ; number, base -> fixnum or 'nan
         (list 'filter filter)
         (list 'find find)
         (list 'find-tail find-tail)
+        (list 'flatten flatten)
         (list 'flip flip)
         (list 'fold fold)
         (list 'force force)
@@ -1639,11 +1752,13 @@ str->fix ; number, base -> fixnum or 'nan
         (list 'last-pair last-pair)
         (list 'make-promise make-promise)
         (list 'make-proper-list make-proper-list)
+        (list 'print print)
         (list 'promise? promise?)
         (list 'range range)
         (list 'reduce reduce)
         (list 'sign sign)
         (list 'sort sort)
+        (list 'sys:count sys:count)
         (list 'take take)
         (list 'take-while take-while)))
 
@@ -1764,46 +1879,7 @@ str->fix ; number, base -> fixnum or 'nan
             (compile-define-procedure-special-form form tail-position)
             (error "Invalid define form"))))
   (define (compile-defmacro-special-form form tail-position)
-    (error "TODO: No macro support yet!"))
-
-    ; private void HandleMacros(ref object obj)
-    ; {
-    ;     if (obj == null) return;
-    ;     if (!(obj is Pair)) return;
-    ;     if (!(((Pair)obj).First is Symbol)) return;
-    ;     var form = ((Pair)obj).ToList();
-    ; 
-    ;     if (form[0].ToString() == "defmacro")
-    ;     {
-    ;         if (!(form[1] is Symbol)) throw new SchemeException("Invalid defmacro form: Name must be a symbol");
-    ;         string name = "macro##" + form[1] + "##";
-    ;         obj = new Pair(Symbol.FromString("define"), new Pair(new Pair(Symbol.FromString(name), form[2]), ((Pair)((Pair)((Pair)obj).Second).Second).Second));
-    ;         return;
-    ;     }
-    ; 
-    ;     while (true) if (!ExpandMacros(ref obj)) break;
-    ; }
-    ; 
-    ; private bool ExpandMacros(ref object obj)
-    ; {
-    ;     if (obj == null) return false;
-    ;     if (!(obj is Pair)) return false;
-    ;     if (((Pair)obj).First.ToString() == "quote") return false;
-    ;     for (object i = obj; i is Pair; i = ((Pair)i).Second) if (ExpandMacros(ref ((Pair)i).First)) return true;
-    ; 
-    ;     Symbol o1 = ((Pair)obj).First as Symbol;
-    ;     if (o1 == null) return false;
-    ; 
-    ;     Symbol macroSymbol = Symbol.FromString("macro##" + o1 + "##");
-    ;     if (!machine.HasVariable(macroSymbol)) return false;
-    ; 
-    ;     int nextPC = machine.ProgramSize;
-    ;     compiler.Compile(new Pair(macroSymbol, Pair.FromEnumerable(((Pair)((Pair)obj).Second).Select(i => new Pair(Symbol.FromString("quote"), new Pair(i, null))))));
-    ;     obj = machine.Run(nextPC);
-    ; 
-    ;     return true;
-    ; }
-
+    (error "TODO: No macro support yet!")) ; TODO: Handle-Macros, Expand-Macros
   (define (compile-if-special-form form tail-position)
     (if (= 4 (length form))
         (let ((true-label (make-label))
