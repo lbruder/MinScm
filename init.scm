@@ -1,6 +1,6 @@
 ; vim:lisp:et:ai
 
-; init.scm version 2013-03-26
+; init.scm version 2013-03-28
 ; A minimal Scheme library
 ; This is an effort to create a small library of Scheme procedures
 ; as defined in R5RS with parts of SRFI-1.
@@ -373,6 +373,11 @@ str->fix ; number, base -> fixnum or 'nan
      (if it 
          ,then 
          ,(if (null? rest) #f (car rest)))))
+
+(defmacro or args
+  (if (null? (cdr args))
+      (car args)
+      (list 'aif (car args) 'it (cons 'or (cdr args))))) 
 
 (defmacro awhen (expr . then) 
   `(let ((it ,expr)) 
