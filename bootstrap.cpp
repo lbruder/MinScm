@@ -1,11 +1,10 @@
 // vim:et
 
-// MinScm.cpp version 2013-03-25
+// MinScm.cpp version 2013-04-12
 // An experimental Scheme subset interpreter in C++, based on SchemeNet.cs
 // Features: Tail calls, CL style macros, part of SRFI-1
 // Copyright (c) 2013, Leif Bruder <leifbruder@gmail.com>
 //
-// TODO: No reference counting or GC yet. Leaking memory like hell!
 // TODO: string/number conversion: Not possible for base 2 yet
 //
 // Permission to use, copy, modify, and/or distribute this software for any
@@ -23,6 +22,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -41,6 +41,10 @@ public:
     virtual ~Object() { }
     virtual ObjectType getType() const = 0;
     virtual string toString() const = 0;
+    virtual void getReferences(set<Object*> *dest) const = 0;
+    virtual bool gcIgnore() { return false; }
+    void initGC() { gcMarked = false; }
+    bool gcMarked;
 };
 
 void assertType(const char *procedure, const Object *o, ObjectType expectedType)
@@ -58,6 +62,7 @@ public:
     Object *getValue() { return _value; }
     ObjectType getType() const { return otTag; }
     string toString() const { return "<tag " + _value->toString() + ">"; }
+    void getReferences(set<Object*> *dest) const { dest->insert(_value); }
 
 private:
     Object *_value;
@@ -72,6 +77,7 @@ public:
     Object *_cdr;
     Pair(Object *car, Object *cdr): _car(car), _cdr(cdr) { }
     ObjectType getType() const { return otPair; }
+    void getReferences(set<Object*> *dest) const { dest->insert(_car); dest->insert(_cdr); }
     
     string toString() const
     {
@@ -112,6 +118,8 @@ public:
     ObjectType getType() const { return otNull; }
     string toString() const { return "()"; }
     static const Null *getInstance() { return _instance; }
+    void getReferences(set<Object*> *dest) const { }
+    bool gcIgnore() { return true; }
 
 private:
     Null() { }
@@ -129,6 +137,11 @@ public:
     Environment(Environment *outer): _outer(outer) { }
     ObjectType getType() const { return otEnvironment; }
     string toString() const { return "<Environment>"; }
+    void getReferences(set<Object*> *dest) const
+    {
+        for (map<string, Object*>::const_iterator i = _data.begin(); i != _data.end(); ++i)
+            dest->insert((Object*)i->second);
+    }
 
     void define(const string& identifier, Object *value)
     {
@@ -186,6 +199,7 @@ public:
     Fixnum(long value): _value(value) { }
     long getValue() const { return _value; }
     ObjectType getType() const { return otFixnum; }
+    void getReferences(set<Object*> *dest) const { }
     
     string toString() const
     {
@@ -206,6 +220,7 @@ public:
     Flonum(double value): _value(value) { }
     double getValue() const { return _value; }
     ObjectType getType() const { return otFlonum; }
+    void getReferences(set<Object*> *dest) const { }
     
     string toString() const
     {
@@ -226,6 +241,8 @@ public:
     ObjectType getType() const { return otSymbol; }
     string toString() const { return _value; }
     string getName() const { return _value; }
+    void getReferences(set<Object*> *dest) const { }
+    bool gcIgnore() { return true; }
     
     static Symbol *fromString(const string& value)
     {
@@ -253,6 +270,7 @@ public:
     long getLength() const { return _value.size(); }
     int GetAt(int index) const { return _value[index]; }
     void SetAt(int index, int newChar) { _value[index] = newChar; }
+    void getReferences(set<Object*> *dest) const { }
 
     string getValue() const
     {
@@ -276,6 +294,8 @@ public:
     static const Boolean *getTrue() { return _true; }
     static const Boolean *getFalse() { return _false; }
     static const Boolean *valueOf(bool value) { return value ? _true : _false; }
+    void getReferences(set<Object*> *dest) const { }
+    bool gcIgnore() { return true; }
 
 private:
     Boolean(bool value): _value(value) { }
@@ -295,6 +315,7 @@ public:
     Char(int value): _value(value) { }
     int getValue() const { return _value; }
     ObjectType getType() const { return otChar; }
+    void getReferences(set<Object*> *dest) const { }
     
     string toString() const
     {
@@ -315,6 +336,8 @@ public:
     ObjectType getType() const { return otEof; }
     string toString() const { return "<EOF>"; }
     static const Eof *getInstance() { return _instance; }
+    void getReferences(set<Object*> *dest) const { }
+    bool gcIgnore() { return true; }
 
 private:
     Eof() { }
@@ -338,6 +361,8 @@ public:
     virtual bool hasRestParameter() const { return false; }
     virtual Object* getBody() const { return Symbol::fromString("builtin"); }
     virtual const vector<string>* getArgumentNames() const { return new vector<string>(); }
+    void getReferences(set<Object*> *dest) const { }
+    bool gcIgnore() { return true; }
 
 protected:
     void assertParameterCount(int expected, int got) const
@@ -419,6 +444,8 @@ public:
     virtual Object* getBody() const { return _body; }
     virtual const vector<string>* getArgumentNames() const { return &_argumentNames; }
     Environment *getCapturedEnvironment() const { return _env; }
+    void getReferences(set<Object*> *dest) const { dest->insert(_body); dest->insert(_env); }
+    bool gcIgnore() { return false; }
 
 private:
     Object *_body;
@@ -426,7 +453,6 @@ private:
     vector<string> _argumentNames;
     bool _hasRest;
 };
-
 
 //----------------------------------------------------------------------------------------------------------------------
 
@@ -439,6 +465,11 @@ public:
     long getLength() const { return _value.size(); }
     Object* GetAt(int index) const { return _value[index]; }
     void SetAt(int index, Object* newValue) { _value[index] = newValue; }
+    void getReferences(set<Object*> *dest) const
+    {
+        for (vector<Object*>::const_iterator i = _value.begin(); i != _value.end(); ++i)
+            dest->insert((Object*)*i);
+    }
     
     string toString() const
     {
