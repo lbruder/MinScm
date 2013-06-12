@@ -1,6 +1,6 @@
 // vim:et
 
-// MinScm.cpp version 2013-04-12
+// MinScm.cpp version 2013-06-12
 // An experimental Scheme subset interpreter in C++, based on SchemeNet.cs
 // Features: Tail calls, CL style macros, part of SRFI-1
 // Copyright (c) 2013, Leif Bruder <leifbruder@gmail.com>
@@ -29,28 +29,51 @@
 
 using namespace std;
 
+#define GC_FREQUENCY 100000
+
 //----------------------------------------------------------------------------------------------------------------------
 
 #define error(msg) do { cout << msg << endl; throw 0; } while(0)
 
 enum ObjectType { otFixnum, otFlonum, otSymbol, otPair, otString, otBoolean, otChar, otNull, otProcedure, otVector, otEof, otEnvironment, otTag };
 
+class Object;
+
+bool needToRunGC;
+long objectsAllocatedSinceLastGc;
+set<Object*> heap;
+set<Object*> objectsToMark;
+
 class Object
 {
 public:
-    virtual ~Object() { }
+    Object() { heap.insert(this); ++objectsAllocatedSinceLastGc; if (objectsAllocatedSinceLastGc >= GC_FREQUENCY) needToRunGC = true; }
+    virtual ~Object() { heap.erase(this); }
     virtual ObjectType getType() const = 0;
     virtual string toString() const = 0;
     virtual void getReferences(set<Object*> *dest) const = 0;
     virtual bool gcIgnore() { return false; }
-    void initGC() { gcMarked = false; }
+    void gcInit() { gcMarked = false; gcHandled = false; }
+    void gcMark() { if (!gcMarked) getReferences(&objectsToMark); gcMarked = true; }
     bool gcMarked;
+    bool gcHandled;
 };
 
 void assertType(const char *procedure, const Object *o, ObjectType expectedType)
 {
     if (o->getType() != expectedType)
         error((string)procedure + ": Invalid argument type");
+}
+
+void gc()
+{
+        cout << "Garbage collection..." << flush;
+        needToRunGC = false;
+        objectsAllocatedSinceLastGc = 0;
+        // TODO: Mark all reachable objects
+        // TODO: Transfer all objects that were not marked into a "delete" list
+        // TODO: Delete everything from that list
+        cout << " Done." << endl;
 }
 
 //----------------------------------------------------------------------------------------------------------------------
@@ -1068,6 +1091,8 @@ public:
 tailCall:
         if (_global.get("print-eval-forms")->getType() != otNull)
             cout << "evalExpandedForm: " << form->toString() << endl;
+
+        if (needToRunGC) gc();
 
         switch (form->getType())
         {
