@@ -1,6 +1,6 @@
 ; vim:lisp:et:ai
 
-; init.scm version 2013-03-28
+; init.scm version 2013-06-12
 ; A minimal Scheme library
 ; This is an effort to create a small library of Scheme procedures
 ; as defined in R5RS with parts of SRFI-1.
@@ -75,9 +75,9 @@ str->fix ; number, base -> fixnum or 'nan
 ; ----------------------------------------------------------------------------
 
 ; - TODO: Add unit tests! Check all of R5RS. Everything working correctly?
-; - TODO: or, named let, letrec...
+; - TODO: named let, letrec...
 ; - TODO: Signed numbers and rationals in reader
-; - TODO: eval has no define form yet
+; - TODO: eval and compile have no macro support yet; eval takes a defmacro, but creates lambdas instead ATM
 ; - TODO: string->number should return #f if argument not a number
 ; - TODO: if form should have an optional else-part
 ; - TODO: read... should return the eof-object? instead of an error
@@ -1490,7 +1490,20 @@ str->fix ; number, base -> fixnum or 'nan
             (analyze-procedure-define-special-form form)
             (analyze-variable-define-special-form form))))
   (define (analyze-defmacro-special-form form)
-    (error "defmacro: No macro support yet!")) ; TODO
+    (if (< (length form) 3)
+        (error "Invalid defmacro form: Expected >= 3 parameters")
+        (let* ((name (car form))
+               (parameter-names (cadr form))
+               (body (map analyze (cddr form))))
+          (display (list 'macro-name: name 'macro-params: parameter-names 'body: body))
+          (newline)
+          (if (and (every symbol? parameter-names)
+                   (symbol? name))
+              (lambda (env)
+                ((env 'define) name
+                               (make-lambda name env parameter-names body)) ; TODO: Discern between macros and lambdas
+                'undefined)
+              (error "Invalid defmacro form: Macro and argument names must be symbols")))))
   (define (analyze-if-special-form form)
     (if (= 3 (length form))
         (let ((condition (analyze (car form)))
